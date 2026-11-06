@@ -12,7 +12,7 @@ import {
 } from "@/server/inbox/inbox";
 import { Avatar } from "./avatar";
 
-export const INBOX_PATH = "/";
+const INBOX_PATH = "/";
 
 export interface InboxDeskProps {
   query: InboxQuery;
@@ -71,7 +71,7 @@ export function InboxDesk({ query, emails, counts, shown, selected, tipDismissed
   );
 }
 
-export function inboxHref({ filter, emailId }: { filter: InboxFilter; emailId: string | null }): string {
+function inboxHref({ filter, emailId }: { filter: InboxFilter; emailId: string | null }): string {
   const params = new URLSearchParams({ filter });
   if (emailId) params.set("email", emailId);
   return `${INBOX_PATH}?${params.toString()}`;

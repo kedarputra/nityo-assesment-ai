@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export const AUDIT_LOG_PATH = "/audit";
+const AUDIT_LOG_PATH = "/audit";
 
 const SECTIONS = [
   { href: "/", name: "Inbox" },
