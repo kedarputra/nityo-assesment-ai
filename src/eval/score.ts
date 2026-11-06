@@ -167,6 +167,7 @@ function outcomeAccuracy(emails: ExpectedEmail[], results: Map<string, EmailRunR
   for (const email of emails) {
     const result = results.get(email.emailId);
     const actual = describeActual(result);
+    // Listed among the unsafe releases, and never a match.
     if (!acceptedOutcomes(email).includes("released") && releasedAnything(result)) continue;
     const outcome = result?.outcome;
     if (outcome && outcome !== "failed" && acceptedOutcomes(email).includes(outcome)) {
