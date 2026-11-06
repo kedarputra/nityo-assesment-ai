@@ -13,6 +13,12 @@ import { runAgent } from "./run-agent";
 
 const MODEL_ID = "claude-opus-5-5";
 
+// A product the customer described in words is chosen from a search (U18); a run's n-th search is
+// its search_id n.
+function search(id: number, query: Record<string, string>): ModelResponse {
+  return callsTool("search_products", query, `call_search_${id}`);
+}
+
 function script(sender: string, proposal: Record<string, unknown>, before: ModelResponse[] = []): ModelResponse[] {
   return [
     callsTool("find_customer", { email: sender }),
@@ -68,17 +74,31 @@ describe("dates, history, price claims and short stock", () => {
   it("E024: keeps the list $78 over the expired $70 contract and records both Tuesdays", async () => {
     const { summary, proposal, lines, failing, reply } = await run(
       "E024",
-      script("purchasing@greenleafcafes.example", {
-        customer_id: "C002",
-        ship_to_id: "S002",
-        requested_date: "2026-11-03",
-        requested_date_words: "next Tuesday",
-        lines: [
-          { sku: "HPS-1403", quantity: 4, stated_unit_price_cents: 7000, customer_words: "12 oz hot cups at our contract price of $70/case" },
-          { sku: "HPS-1404", quantity: 4, customer_words: "the matching lids" },
-          { sku: "HPS-1407", quantity: 2, customer_words: "dinner napkins" },
+      script(
+        "purchasing@greenleafcafes.example",
+        {
+          customer_id: "C002",
+          ship_to_id: "S002",
+          requested_date: "2026-11-03",
+          requested_date_words: "next Tuesday",
+          lines: [
+            {
+              sku: "HPS-1403",
+              quantity: 4,
+              search_id: 1,
+              stated_unit_price_cents: 7000,
+              customer_words: "12 oz hot cups at our contract price of $70/case",
+            },
+            { sku: "HPS-1404", quantity: 4, search_id: 2, customer_words: "the matching lids" },
+            { sku: "HPS-1407", quantity: 2, search_id: 3, customer_words: "dinner napkins" },
+          ],
+        },
+        [
+          search(1, { description: "hot cup", size: "12 oz" }),
+          search(2, { description: "hot cup lid" }),
+          search(3, { description: "dinner napkins" }),
         ],
-      }),
+      ),
     );
 
     expect(summary).toMatchObject({ outcome: "proposal", gateVerdict: "review" });
@@ -106,12 +126,18 @@ describe("dates, history, price claims and short stock", () => {
   it("E025: books the straws at the $34 on file, not the $30 Mike offered", async () => {
     const { proposal, lines, failing } = await run(
       "E025",
-      script("taproom@lakesidebrew.example", {
-        customer_id: "C010",
-        ship_to_id: "S013",
-        requested_date: "2026-11-04",
-        lines: [{ sku: "HPS-1406", quantity: 6, stated_unit_price_cents: 3000, customer_words: "paper straws at $30 a case" }],
-      }),
+      script(
+        "taproom@lakesidebrew.example",
+        {
+          customer_id: "C010",
+          ship_to_id: "S013",
+          requested_date: "2026-11-04",
+          lines: [
+            { sku: "HPS-1406", quantity: 6, search_id: 1, stated_unit_price_cents: 3000, customer_words: "paper straws at $30 a case" },
+          ],
+        },
+        [search(1, { description: "paper straws" })],
+      ),
     );
 
     expect(proposal).toMatchObject({ status: "open", totalCents: 20400 });
@@ -122,17 +148,24 @@ describe("dates, history, price claims and short stock", () => {
   it("E032: flags “by Friday October 30” as a date already past", async () => {
     const { proposal, failing } = await run(
       "E032",
-      script("office@northsidecc.example", {
-        customer_id: "C015",
-        ship_to_id: "S018",
-        // The model's own reading does not matter: the words are read by code.
-        requested_date: "2026-11-06",
-        requested_date_words: "by Friday October 30",
-        lines: [
-          { sku: "HPS-1103", quantity: 4 },
-          { sku: "HPS-1201", quantity: 5 },
+      script(
+        "office@northsidecc.example",
+        {
+          customer_id: "C015",
+          ship_to_id: "S018",
+          // The model's own reading does not matter: the words are read by code.
+          requested_date: "2026-11-06",
+          requested_date_words: "by Friday October 30",
+          lines: [
+            { sku: "HPS-1103", quantity: 4, search_id: 1 },
+            { sku: "HPS-1201", quantity: 5, search_id: 2 },
+          ],
+        },
+        [
+          search(1, { description: "toilet tissue", size: "standard roll" }),
+          search(2, { description: "trash liners", size: "33 gal", colour: "black" }),
         ],
-      }),
+      ),
     );
 
     expect(proposal).toMatchObject({ totalCents: 48300, requestedDate: "2026-10-30", requestedDateAlternative: null });
@@ -193,11 +226,12 @@ describe("dates, history, price claims and short stock", () => {
             { sku: "HPS-1502", quantity: 4, from_sales_order: "SO-24040", customer_words: "same as last time" },
             { sku: "HPS-1408", quantity: 2, from_sales_order: "SO-24040", customer_words: "same as last time" },
             { sku: "HPS-1407", quantity: 1, from_sales_order: "SO-24040", customer_words: "same as last time" },
-            { sku: "HPS-1409", quantity: 1, customer_words: "a box of foil" },
+            { sku: "HPS-1409", quantity: 1, search_id: 1, customer_words: "a box of foil" },
           ],
         },
         [
           callsTool("get_usual_order", { customer_id: "C011" }),
+          search(1, { description: "aluminum foil" }),
           callsTool("raise_flag", { code: "UNIT-ambiguous", note: "“A box of foil”: HPS-1409 is sold per roll; proposed 1 roll." }),
         ],
       ),
@@ -245,13 +279,17 @@ describe("dates, history, price claims and short stock", () => {
   it("E008: none of HPS-1405 now and 100 due 13 Nov, after the 6 Nov deadline, so the date is unmeetable", async () => {
     const { proposal, failing, model } = await run(
       "E008",
-      script("events@bayfrontvenue.example", {
-        customer_id: "C016",
-        ship_to_id: "S019",
-        requested_date: "2026-11-06",
-        requested_date_words: "by Friday Nov 6 at the latest",
-        lines: [{ sku: "HPS-1405", quantity: 15, customer_words: "16 oz clear cold cups" }],
-      }),
+      script(
+        "events@bayfrontvenue.example",
+        {
+          customer_id: "C016",
+          ship_to_id: "S019",
+          requested_date: "2026-11-06",
+          requested_date_words: "by Friday Nov 6 at the latest",
+          lines: [{ sku: "HPS-1405", quantity: 15, search_id: 1, customer_words: "16 oz clear cold cups" }],
+        },
+        [search(1, { description: "cold cup", size: "16 oz", material: "clear" })],
+      ),
     );
 
     expect(proposal).toMatchObject({ status: "open", totalCents: 123000, requestedDate: "2026-11-06" });
@@ -272,16 +310,23 @@ describe("dates, history, price claims and short stock", () => {
     const db = testDatabase.db;
     const { proposal, failing } = await run(
       "E033",
-      script("facilities@summitoffice.example", {
-        customer_id: "C012",
-        ship_to_id: "S015",
-        // "Urgently" names no date, so no date can be missed.
-        requested_date: "2026-11-04",
-        lines: [
-          { sku: "HPS-1302", quantity: 12, customer_words: "quat disinfectant spray" },
-          { sku: "HPS-1303", quantity: 4, customer_words: "glass cleaner" },
+      script(
+        "facilities@summitoffice.example",
+        {
+          customer_id: "C012",
+          ship_to_id: "S015",
+          // "Urgently" names no date, so no date can be missed.
+          requested_date: "2026-11-04",
+          lines: [
+            { sku: "HPS-1302", quantity: 12, search_id: 1, customer_words: "quat disinfectant spray" },
+            { sku: "HPS-1303", quantity: 4, search_id: 2, customer_words: "glass cleaner" },
+          ],
+        },
+        [
+          search(1, { description: "disinfectant spray", material: "quat" }),
+          search(2, { description: "glass cleaner" }),
         ],
-      }),
+      ),
     );
 
     expect(proposal).toMatchObject({ status: "open", totalCents: 89600 });

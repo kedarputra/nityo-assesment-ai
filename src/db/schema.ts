@@ -233,7 +233,9 @@ export const agentRuns = pgTable(
   ],
 );
 
-export const proposalStatuses = ["open", "released"] as const;
+// `held` waits on something outside the desk and can still be decided; `rejected` is final, and so
+// is `released` once its 10-second Undo has passed.
+export const proposalStatuses = ["open", "released", "rejected", "held"] as const;
 export type ProposalStatus = (typeof proposalStatuses)[number];
 
 // One release check's result, as the gate recorded it.
@@ -274,11 +276,16 @@ export const proposals = pgTable(
     status: text("status", { enum: proposalStatuses }).notNull(),
     checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
     soNumber: text("so_number").references(() => salesOrders.soNumber),
+    // The person's decision: who, when, and the reason a reject or a hold requires. Null while
+    // open, and on a release the gate made alone.
+    decidedBy: integer("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("proposals_email_id_idx").on(table.emailId),
-    check("proposals_status_check", sql`${table.status} in ('open', 'released')`),
+    check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held')`),
   ],
 );
 
@@ -299,9 +306,29 @@ export const proposalLines = pgTable(
     customerWords: text("customer_words"),
     // The earlier sales order a line repeats ("same as last time", "the usual").
     fromSalesOrder: text("from_sales_order"),
+    // The search this line was chosen from, when the customer described the product in words.
+    productSearchId: integer("product_search_id").references(() => productSearches.id),
+    // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
+    replacesSku: text("replaces_sku"),
   },
   (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
 );
+
+// A `search_products` call and what it found, so the gate can check that a described line cites a
+// search that left exactly one ACTIVE candidate (U18), rather than take the model's word for it.
+export const productSearches = pgTable("product_searches", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  query: jsonb("query").$type<Record<string, string>>().notNull(),
+  candidateSkus: jsonb("candidate_skus").$type<string[]>().notNull(),
+  discontinuedSkus: jsonb("discontinued_skus").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const agentFlags = pgTable("agent_flags", {
   id: serial("id").primaryKey(),
@@ -316,7 +343,8 @@ export const agentFlags = pgTable("agent_flags", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// A reply the agent wrote for a person to edit and approve. It is never sent.
+// A reply the agent wrote for a person to edit and approve. It is never sent. Once a person marks
+// it ready, it is locked.
 export const draftReplies = pgTable("draft_replies", {
   id: serial("id").primaryKey(),
   runId: text("run_id")
@@ -326,6 +354,8 @@ export const draftReplies = pgTable("draft_replies", {
     .notNull()
     .references(() => emails.emailId),
   body: text("body").notNull(),
+  readyBy: integer("ready_by").references(() => users.id),
+  readyAt: timestamp("ready_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

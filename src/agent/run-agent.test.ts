@@ -14,7 +14,7 @@ import { ScriptedModel, callsTool, repliesWith } from "@/model/scripted-model";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e001Lines, e001Script } from "@/test/e001-script";
-import { releaseChecks } from "./release-gate";
+import { releaseChecks } from "./release-checks";
 import { AgentRunRefused, MAX_MODEL_CALLS, runAgent } from "./run-agent";
 
 const MODEL_ID = "claude-opus-5-5";
@@ -146,6 +146,7 @@ describe("an Agent run", () => {
       "find_customer",
       "list_ship_tos",
       "get_product",
+      "search_products",
       "price_line",
       "check_stock",
       "check_credit",
@@ -271,6 +272,8 @@ describe("an Agent run", () => {
       const db = testDatabase.db;
       const model = new ScriptedModel([
         callsTool("find_customer", { email: "hello@coastalcatering.example" }),
+        callsTool("search_products", { description: "wooden cutlery kit" }, "call_search_cutlery"),
+        callsTool("search_products", { description: "soup cup", size: "16 oz" }, "call_search_cups"),
         // An argument the tool does not have is refused, not quietly dropped.
         callsTool("propose_new_order", {
           customer_id: "C009",
@@ -284,8 +287,8 @@ describe("an Agent run", () => {
           ship_to_id: "S012",
           requested_date: "2026-11-07",
           lines: [
-            { sku: "HPS-1408", quantity: 6 },
-            { sku: "HPS-1402", quantity: 3 },
+            { sku: "HPS-1408", quantity: 6, search_id: 1 },
+            { sku: "HPS-1402", quantity: 3, search_id: 2 },
           ],
         }),
         repliesWith("The order is approved and on its way."),
@@ -293,7 +296,7 @@ describe("an Agent run", () => {
 
       const summary = await runAgent(db, model, { emailId: "E007", modelId: MODEL_ID });
 
-      const refused = model.requests[2]?.messages.at(-1)?.content[0];
+      const refused = model.requests[4]?.messages.at(-1)?.content[0];
       expect(refused).toMatchObject({ type: "tool_result", isError: true });
 
       expect(summary).toMatchObject({ outcome: "proposal", gateVerdict: "review" });

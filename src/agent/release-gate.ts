@@ -2,11 +2,14 @@ import { and, eq, inArray, sql, sum } from "drizzle-orm";
 import type { Database } from "@/db/database";
 import {
   agentFlags,
+  auditEvents,
   customerContacts,
   customerPrices,
   customers,
+  emails,
   incomingSupply,
   inventory,
+  productSearches,
   products,
   proposalLines,
   proposals,
@@ -22,26 +25,13 @@ import { creditCheck, orderValue, priceFor, sellability, stockFor, type Price, t
 import { resolveRequestedDate } from "@/rules/requested-date";
 import { shortStock, type ShortStock, type ShortStockChoice } from "@/rules/short-stock";
 import { recordAudit } from "./audit";
+import { sellingUnitFits, skuCodesIn } from "./product-search";
+import { releaseChecks, type ReleaseCheck } from "./release-checks";
 import { ToolError } from "./tool-error";
 
 // The release gate (ADR 0001): code, not the model, decides whether a proposed new order is a
 // Clean order. It prices every line itself, so a price the model or the email names is only ever
 // compared, never used.
-
-// Every release check, in the order a person reads them.
-export const releaseChecks = [
-  "known-contact",
-  "skus-sellable",
-  "system-price",
-  "full-stock",
-  "requested-date",
-  "from-history",
-  "credit-hold",
-  "credit-limit",
-  "ship-to",
-  "no-flags",
-] as const;
-export type ReleaseCheck = (typeof releaseChecks)[number];
 
 export interface ProposedLine {
   sku: string;
@@ -51,6 +41,13 @@ export interface ProposedLine {
   customerWords: string | null;
   // The earlier sales order this line repeats, for "same as last time" and "the usual".
   fromSalesOrder: string | null;
+  // The `search_products` call the SKU was chosen from, when the customer described it in words.
+  productSearchId: number | null;
+  // The unit and amount the customer wrote, when they differ from whole selling units (U1).
+  unitAsWritten: string | null;
+  quantityAsWritten: number | null;
+  // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
+  replacesSku: string | null;
 }
 
 export interface ProposedNewOrder {
@@ -81,53 +78,46 @@ export interface GateResult {
   checks: RecordedCheck[];
 }
 
-interface PricedLine extends ProposedLine {
+type Product = typeof products.$inferSelect;
+
+export interface PricedLine extends ProposedLine {
+  product: Product | null;
   price: Price | null;
   sellable: boolean;
   // Null when the SKU is not in the catalog.
   stock: Stock | null;
+  // The product this line replaces, with its system price, when it is a substitution.
+  replaced: { product: Product; price: Price } | null;
 }
 
-// Releases are serialised, so two runs never allocate the same stock or take the same SO number.
+interface CitedSearch {
+  runId: string;
+  candidateSkus: string[];
+  discontinuedSkus: string[];
+}
+
 const RELEASE_LOCK = 0x48500601;
+
+// The audit actions that name a released sales order: the gate's own and a person's approval.
+export const RELEASE_ACTIONS = ["order.released", "proposal.approved"];
 
 // Records the Proposal, runs every check, and releases it when all pass, all in the caller's
 // transaction, so a failure part-way leaves no Proposal, order, allocation or audit event behind.
 export async function proposeNewOrder(tx: Database, context: GateContext, order: ProposedNewOrder): Promise<GateResult> {
-  await tx.execute(sql`select pg_advisory_xact_lock(${RELEASE_LOCK})`);
+  await lockReleases(tx);
 
-  const [customer] = await tx.select().from(customers).where(eq(customers.customerId, order.customerId));
-  if (!customer) throw new ToolError(`There is no customer ${order.customerId}.`);
-
-  const lines = await priceLines(tx, order, context.orderDate);
-  await confirmHistory(tx, order);
-  const requested = readRequestedDate(order, context.orderDate);
-  const pricedLines = lines.flatMap((line) =>
-    line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : [],
-  );
-  const totalCents = pricedLines.length > 0 ? orderValue({ lines: pricedLines }).totalCents : 0;
-
-  const contacts = await tx
-    .select({ email: customerContacts.email })
-    .from(customerContacts)
-    .where(eq(customerContacts.customerId, customer.customerId));
-  const [shipTo] = await tx
-    .select({ shipToId: shipToAddresses.shipToId })
-    .from(shipToAddresses)
-    .where(and(eq(shipToAddresses.shipToId, order.shipToId), eq(shipToAddresses.customerId, customer.customerId)));
-  const flags = await tx.select({ code: agentFlags.code }).from(agentFlags).where(eq(agentFlags.runId, context.runId));
-  const releasedTodayCents = await releasedTodayFor(tx, customer.customerId);
-
-  const credit = creditCheck({ customer, releasedTodayCents, orderValueCents: totalCents });
-  const sender = normaliseAddress(context.senderEmail);
-  const checks = evaluate({
-    knownContact: contacts.some((contact) => normaliseAddress(contact.email) === sender),
-    lines,
-    requested,
-    credit,
-    shipToIsTheCustomers: shipTo !== undefined,
-    flagCodes: flags.map((flag) => flag.code),
+  const { lines, requested, totalCents, checks } = await checkOrder(tx, {
+    runId: context.runId,
+    emailId: context.emailId,
+    senderEmail: context.senderEmail,
+    orderDate: context.orderDate,
+    customerId: order.customerId,
+    shipToId: order.shipToId,
+    requestedDate: order.requestedDate,
+    requestedDateWords: order.requestedDateWords,
+    lines: order.lines,
   });
+  await confirmHistory(tx, order);
   const verdict: GateVerdict = checks.every((result) => result.passes) ? "released" : "review";
 
   const [proposal] = await tx
@@ -135,7 +125,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     .values({
       runId: context.runId,
       emailId: context.emailId,
-      customerId: customer.customerId,
+      customerId: order.customerId,
       shipToId: order.shipToId,
       customerPo: order.customerPo,
       requestedDate: requested.date,
@@ -158,6 +148,8 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       statedPriceCents: line.statedUnitPriceCents,
       customerWords: line.customerWords,
       fromSalesOrder: line.fromSalesOrder,
+      productSearchId: line.productSearchId,
+      replacesSku: line.replacesSku,
     })),
   );
 
@@ -174,11 +166,14 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     return { proposalId: proposal.id, verdict, soNumber: null, ...dates, totalCents, checks };
   }
 
-  const soNumber = await release(tx, {
+  const soNumber = await releaseOrder(tx, {
     proposalId: proposal.id,
-    order: { ...order, requestedDate: requested.date },
+    customerId: order.customerId,
+    shipToId: order.shipToId,
+    customerPo: order.customerPo,
+    requestedDate: requested.date,
     orderDate: context.orderDate,
-    lines: lines.flatMap((line) => (line.price ? [{ ...line, unitPriceCents: line.price.unitPriceCents }] : [])),
+    lines: sellableLines(lines),
   });
   await recordAudit(tx, {
     ...audit,
@@ -187,7 +182,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     detail: {
       proposalId: proposal.id,
       soNumber,
-      customerId: customer.customerId,
+      customerId: order.customerId,
       shipToId: order.shipToId,
       totalCents,
       allocated: lines.map((line) => ({ sku: line.sku, quantity: line.quantity })),
@@ -196,8 +191,91 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
   return { proposalId: proposal.id, verdict, soNumber, ...dates, totalCents, checks };
 }
 
-async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: string): Promise<PricedLine[]> {
-  const skus = [...new Set(order.lines.map((line) => line.sku))];
+// Releases are serialised, so two runs or two people never allocate the same stock or take the
+// same SO number. Every caller that checks and then releases or withdraws takes it first.
+export async function lockReleases(tx: Database): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${RELEASE_LOCK})`);
+}
+
+// An order as the gate checks it, whether the agent just proposed it or a person edited it.
+export interface OrderToCheck {
+  // The run's flags count against the order (the no-flags check).
+  runId: string;
+  // The email's own SKU codes count for the confident-skus and no-substitution checks.
+  emailId: string;
+  senderEmail: string;
+  orderDate: string;
+  customerId: string;
+  shipToId: string;
+  requestedDate: string;
+  // The email's own words for the date, which win over the model's reading of them.
+  requestedDateWords: string | null;
+  lines: ProposedLine[];
+}
+
+export interface CheckedOrder {
+  lines: PricedLine[];
+  requested: ReadDate;
+  totalCents: number;
+  checks: RecordedCheck[];
+}
+
+// Prices every line at the system's price and runs every release check against the ERP as it
+// stands now.
+export async function checkOrder(tx: Database, order: OrderToCheck): Promise<CheckedOrder> {
+  const [customer] = await tx.select().from(customers).where(eq(customers.customerId, order.customerId));
+  if (!customer) throw new ToolError(`There is no customer ${order.customerId}.`);
+
+  const [email] = await tx.select({ body: emails.body }).from(emails).where(eq(emails.emailId, order.emailId));
+  const codesInEmail = skuCodesIn(email?.body ?? "");
+  const lines = await priceLines(tx, order);
+  const requested = readRequestedDate(order, order.orderDate);
+  const pricedLines = sellableLines(lines);
+  const totalCents = pricedLines.length > 0 ? orderValue({ lines: pricedLines }).totalCents : 0;
+
+  const contacts = await tx
+    .select({ email: customerContacts.email })
+    .from(customerContacts)
+    .where(eq(customerContacts.customerId, customer.customerId));
+  const [shipTo] = await tx
+    .select({ shipToId: shipToAddresses.shipToId })
+    .from(shipToAddresses)
+    .where(and(eq(shipToAddresses.shipToId, order.shipToId), eq(shipToAddresses.customerId, customer.customerId)));
+  const flags = await tx.select({ code: agentFlags.code }).from(agentFlags).where(eq(agentFlags.runId, order.runId));
+  const releasedTodayCents = await releasedTodayFor(tx, customer.customerId);
+  const searches = await citedSearches(tx, lines);
+  const catalogCodes =
+    codesInEmail.length === 0
+      ? []
+      : await tx
+          .select({ sku: products.sku, status: products.status })
+          .from(products)
+          .where(inArray(products.sku, codesInEmail));
+
+  const credit = creditCheck({ customer, releasedTodayCents, orderValueCents: totalCents });
+  const sender = normaliseAddress(order.senderEmail);
+  const checks = evaluate({
+    knownContact: contacts.some((contact) => normaliseAddress(contact.email) === sender),
+    lines,
+    requested,
+    credit,
+    shipToIsTheCustomers: shipTo !== undefined,
+    flagCodes: flags.map((flag) => flag.code),
+    runId: order.runId,
+    codesInEmail,
+    catalogCodes,
+    searches,
+  });
+  return { lines, requested, totalCents, checks };
+}
+
+// The lines a release can carry: every one has a system price once the skus-sellable check passes.
+export function sellableLines(lines: PricedLine[]): ReleasedLine[] {
+  return lines.flatMap((line) => (line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : []));
+}
+
+async function priceLines(tx: Database, order: OrderToCheck): Promise<PricedLine[]> {
+  const skus = [...new Set(order.lines.flatMap((line) => (line.replacesSku ? [line.sku, line.replacesSku] : [line.sku])))];
   const productRows = await tx.select().from(products).where(inArray(products.sku, skus));
   const contracts = await tx
     .select()
@@ -211,10 +289,17 @@ async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: stri
 
   return order.lines.map((line) => {
     const product = productRows.find((row) => row.sku === line.sku);
-    if (!product) return { ...line, price: null, sellable: false, stock: null };
+    const { orderDate } = order;
+    const replacedProduct = productRows.find((row) => row.sku === line.replacesSku);
+    const replaced = replacedProduct
+      ? { product: replacedProduct, price: priceFor({ customerId: order.customerId, orderDate, product: replacedProduct, contracts }) }
+      : null;
+    if (!product) return { ...line, product: null, price: null, sellable: false, stock: null, replaced };
     const price = priceFor({ customerId: order.customerId, orderDate, product, contracts });
     return {
       ...line,
+      product,
+      replaced,
       price,
       sellable: sellability({ product }).sellable,
       stock: stockFor({
@@ -244,7 +329,7 @@ async function confirmHistory(tx: Database, order: ProposedNewOrder): Promise<vo
   }
 }
 
-interface ReadDate {
+export interface ReadDate {
   date: string;
   alternative: string | null;
   // The date the customer asked for, when they named one; only that date can be missed.
@@ -254,7 +339,10 @@ interface ReadDate {
 
 // The customer's words win over the model's reading of them (U11); a past date (policy 12) or
 // words that could mean two days go to a person.
-function readRequestedDate(order: ProposedNewOrder, orderDate: string): ReadDate {
+function readRequestedDate(
+  order: Pick<OrderToCheck, "requestedDate" | "requestedDateWords">,
+  orderDate: string,
+): ReadDate {
   const words = order.requestedDateWords;
   if (words === null) {
     const past = order.requestedDate < orderDate;
@@ -317,6 +405,13 @@ export async function releasedTodayFor(tx: Database, customerId: string): Promis
   return row?.total ?? 0;
 }
 
+async function citedSearches(tx: Database, lines: PricedLine[]): Promise<Map<number, CitedSearch>> {
+  const ids = [...new Set(lines.flatMap((line) => (line.productSearchId === null ? [] : [line.productSearchId])))];
+  if (ids.length === 0) return new Map();
+  const rows = await tx.select().from(productSearches).where(inArray(productSearches.id, ids));
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
 interface GateFacts {
   knownContact: boolean;
   lines: PricedLine[];
@@ -324,6 +419,10 @@ interface GateFacts {
   credit: ReturnType<typeof creditCheck>;
   shipToIsTheCustomers: boolean;
   flagCodes: string[];
+  runId: string;
+  codesInEmail: string[];
+  catalogCodes: { sku: string; status: Product["status"] }[];
+  searches: Map<number, CitedSearch>;
 }
 
 function evaluate(facts: GateFacts): RecordedCheck[] {
@@ -333,6 +432,9 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
     (line) => line.statedUnitPriceCents !== null && line.statedUnitPriceCents !== line.price?.unitPriceCents,
   );
   const repeated = [...new Set(lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
+  const substitutions = substitutionProblems(facts);
+  const unconfident = unconfidentLines(facts);
+  const oddUnits = unitProblems(lines);
 
   const results: Record<ReleaseCheck, Omit<RecordedCheck, "check">> = {
     "known-contact": facts.knownContact
@@ -342,6 +444,18 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
       notSellable.length === 0
         ? { passes: true, detail: "Every SKU is in the catalog and active." }
         : { passes: false, detail: `Not in the catalog or discontinued: ${notSellable.join(", ")}.` },
+    "no-substitution":
+      substitutions.length === 0
+        ? { passes: true, detail: "No discontinued product was asked for." }
+        : { passes: false, detail: `P3-discontinued: ${substitutions.join(" ")}` },
+    "confident-skus":
+      unconfident.length === 0
+        ? { passes: true, detail: "Every line is a SKU the email names, or the one product its description fits." }
+        : { passes: false, detail: `LOW-CONF-sku: ${unconfident.join(" ")}` },
+    "selling-units":
+      oddUnits.length === 0
+        ? { passes: true, detail: "Every quantity is in whole selling units." }
+        : { passes: false, detail: `UNIT-ambiguous: ${oddUnits.join(" ")}` },
     "system-price":
       priceMismatches.length === 0
         ? { passes: true, detail: "Every line is at the system's price." }
@@ -381,6 +495,84 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
         : { passes: false, detail: `The agent raised: ${facts.flagCodes.join(", ")}.` },
   };
   return releaseChecks.map((check) => ({ check, ...results[check] }));
+}
+
+// Policy 3: a DISCONTINUED product is never swapped on the agent's own authority. A line that
+// replaces one waits for a person, and so does any email naming one, in case the model swapped it
+// without saying so.
+function substitutionProblems({ lines, codesInEmail, catalogCodes }: GateFacts): string[] {
+  const problems = lines.flatMap((line) => {
+    if (line.replacesSku === null) return [];
+    const replaced = line.replaced;
+    if (!replaced || replaced.product.status !== "DISCONTINUED" || replaced.product.replacedBy !== line.sku) {
+      return [`${line.sku} is not the replacement for ${line.replacesSku}.`];
+    }
+    const now = line.product && line.price ? `${line.product.pack} at ${formatUsd(line.price.unitPriceCents)}` : "no price";
+    return [
+      `${line.replacesSku} (${replaced.product.pack} at ${formatUsd(replaced.price.unitPriceCents)}) is discontinued; ${line.sku} (${now}) is swapped in for a person to accept.`,
+    ];
+  });
+  const replacedOnALine = new Set(lines.map((line) => line.replacesSku));
+  const discontinuedNamed = catalogCodes
+    .filter((product) => product.status === "DISCONTINUED" && !replacedOnALine.has(product.sku))
+    .map((product) => product.sku);
+  const unsaid = codesInEmail.filter((code) => discontinuedNamed.includes(code));
+  if (unsaid.length > 0) problems.push(`The email names discontinued ${unsaid.join(", ")}.`);
+  return problems;
+}
+
+// U18: a line is confident when the email names its SKU, when it repeats an earlier order that has
+// the SKU (confirmHistory; the from-history check asks the customer), or when it cites a search
+// this run made that left it as the only ACTIVE candidate and fitted no discontinued product. A
+// SKU code in the email that is not in the catalog means some line is a guess.
+function unconfidentLines({ lines, runId, codesInEmail, catalogCodes, searches }: GateFacts): string[] {
+  const unknownCodes = codesInEmail.filter((code) => !catalogCodes.some((product) => product.sku === code));
+  const problems = unknownCodes.map((code) => `The email names ${code}, which is not in the catalog.`);
+  for (const line of lines) {
+    const asked = line.replacesSku ?? line.sku;
+    if (line.productSearchId === null) {
+      if (!codesInEmail.includes(asked) && line.fromSalesOrder === null) problems.push(`${asked} is not written in the email and cites no search.`);
+      continue;
+    }
+    const search = searches.get(line.productSearchId);
+    if (!search || search.runId !== runId) {
+      problems.push(`${line.sku} cites search ${line.productSearchId}, which this run did not make.`);
+    } else if (line.replacesSku !== null) {
+      if (!sameSkus(search.discontinuedSkus, [line.replacesSku])) {
+        problems.push(`The search does not single out ${line.replacesSku}.`);
+      }
+    } else if (!sameSkus(search.candidateSkus, [line.sku]) || search.discontinuedSkus.length > 0) {
+      problems.push(`${line.sku} is not the only product its description fits (${describeSearch(search)}).`);
+    }
+  }
+  return problems;
+}
+
+function sameSkus(found: string[], expected: string[]): boolean {
+  return found.length === expected.length && found.every((sku, index) => sku === expected[index]);
+}
+
+function describeSearch(search: CitedSearch): string {
+  const candidates = search.candidateSkus.length > 0 ? search.candidateSkus.join(", ") : "no candidates";
+  if (search.discontinuedSkus.length === 0) return candidates;
+  return `${candidates}; also fits discontinued ${search.discontinuedSkus.join(", ")}`;
+}
+
+// U1: a quantity the customer wrote in another unit, or not in whole selling units, is the
+// model's reading, so the customer is asked to confirm it.
+function unitProblems(lines: PricedLine[]): string[] {
+  return lines.flatMap((line) => {
+    const problems: string[] = [];
+    if (line.product && line.unitAsWritten !== null && !sellingUnitFits(line.product, line.unitAsWritten)) {
+      problems.push(
+        `${line.sku} is sold per ${line.product.sellUom === "CS" ? "case" : "each"} (${line.product.pack}), and the customer wrote "${line.unitAsWritten}"; read as ${line.quantity}.`,
+      );
+    }
+    if (line.quantityAsWritten !== null && line.quantityAsWritten !== line.quantity) {
+      problems.push(`${line.sku}: the customer wrote ${line.quantityAsWritten}, read as ${line.quantity}.`);
+    }
+    return problems;
+  });
 }
 
 function describePriceDifference(line: PricedLine): string {
@@ -451,27 +643,37 @@ function day(isoDate: string): string {
   return formatBusinessDay(new Date(`${isoDate}T12:00:00-05:00`));
 }
 
-interface Release {
-  proposalId: number;
-  order: ProposedNewOrder;
-  orderDate: string;
-  lines: (PricedLine & { unitPriceCents: number })[];
+export interface ReleasedLine {
+  sku: string;
+  quantity: number;
+  unitPriceCents: number;
 }
 
-// Creates the sales order and its lines and allocates the stock, which reduces `available`.
-async function release(tx: Database, { proposalId, order, orderDate, lines }: Release): Promise<string> {
+export interface Release {
+  proposalId: number;
+  customerId: string;
+  shipToId: string;
+  customerPo: string | null;
+  requestedDate: string;
+  orderDate: string;
+  lines: ReleasedLine[];
+}
+
+// Creates the sales order and its lines and allocates the stock, which reduces `available`. The
+// caller holds the release lock and writes the audit event.
+export async function releaseOrder(tx: Database, release: Release): Promise<string> {
   const soNumber = await nextSoNumber(tx);
   await tx.insert(salesOrders).values({
     soNumber,
-    customerId: order.customerId,
-    shipToId: order.shipToId,
-    customerPo: order.customerPo,
-    orderDate,
-    requestedDate: order.requestedDate,
+    customerId: release.customerId,
+    shipToId: release.shipToId,
+    customerPo: release.customerPo,
+    orderDate: release.orderDate,
+    requestedDate: release.requestedDate,
     status: "OPEN",
   });
   await tx.insert(salesOrderLines).values(
-    lines.map((line, index) => ({
+    release.lines.map((line, index) => ({
       soNumber,
       lineNo: index + 1,
       sku: line.sku,
@@ -480,20 +682,43 @@ async function release(tx: Database, { proposalId, order, orderDate, lines }: Re
       unitPriceCents: line.unitPriceCents,
     })),
   );
-  for (const line of lines) {
+  for (const line of release.lines) {
     await tx
       .update(inventory)
       .set({ allocated: sql`${inventory.allocated} + ${line.quantity}` })
       .where(eq(inventory.sku, line.sku));
   }
-  await tx.update(proposals).set({ status: "released", soNumber }).where(eq(proposals.id, proposalId));
+  await tx.update(proposals).set({ status: "released", soNumber }).where(eq(proposals.id, release.proposalId));
   return soNumber;
 }
 
+// Undoes a release: the sales order and its lines go, and their stock is returned. The caller
+// holds the release lock, reopens the Proposal and writes the audit event.
+export async function withdrawOrder(tx: Database, soNumber: string): Promise<{ sku: string; quantity: number }[]> {
+  const lines = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.soNumber, soNumber));
+  for (const line of lines) {
+    await tx
+      .update(inventory)
+      .set({ allocated: sql`${inventory.allocated} - ${line.qtyOrdered}` })
+      .where(eq(inventory.sku, line.sku));
+  }
+  await tx.update(proposals).set({ soNumber: null }).where(eq(proposals.soNumber, soNumber));
+  await tx.delete(salesOrderLines).where(eq(salesOrderLines.soNumber, soNumber));
+  await tx.delete(salesOrders).where(eq(salesOrders.soNumber, soNumber));
+  return lines.map((line) => ({ sku: line.sku, quantity: line.qtyOrdered }));
+}
+
+// A withdrawn order's number is never reused, so the audit log's "Released SO-…" events each name
+// one order; the log is append-only, so it still holds every number ever released.
 async function nextSoNumber(tx: Database): Promise<string> {
   const rows = await tx.select({ soNumber: salesOrders.soNumber }).from(salesOrders);
-  const highest = rows.reduce((max, row) => {
-    const match = /^SO-(\d+)$/.exec(row.soNumber);
+  const released = await tx
+    .select({ soNumber: sql<string | null>`${auditEvents.detail} ->> 'soNumber'` })
+    .from(auditEvents)
+    .where(inArray(auditEvents.action, RELEASE_ACTIONS));
+  const numbers = [...rows.map((row) => row.soNumber), ...released.flatMap((row) => (row.soNumber ? [row.soNumber] : []))];
+  const highest = numbers.reduce((max, soNumber) => {
+    const match = /^SO-(\d+)$/.exec(soNumber);
     return match ? Math.max(max, Number(match[1])) : max;
   }, 0);
   return `SO-${highest + 1}`;

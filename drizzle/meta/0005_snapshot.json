@@ -1,5 +1,5 @@
 {
-  "id": "bf4debab-daa2-44d7-b4bd-49cb6fb68f2e",
+  "id": "80833c9e-acc7-4c8e-83b2-ef37c048e21f",
   "prevId": "b919b5ba-5ac5-4f0e-bd64-a0157596200e",
   "version": "7",
   "dialect": "postgresql",
@@ -574,6 +574,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "ready_by": {
+          "name": "ready_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ready_at": {
+          "name": "ready_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -606,6 +618,19 @@
           ],
           "columnsTo": [
             "email_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "draft_replies_ready_by_users_id_fk": {
+          "name": "draft_replies_ready_by_users_id_fk",
+          "tableFrom": "draft_replies",
+          "tableTo": "users",
+          "columnsFrom": [
+            "ready_by"
+          ],
+          "columnsTo": [
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -912,12 +937,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "from_sales_order": {
-          "name": "from_sales_order",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -996,18 +1015,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "requested_date_words": {
-          "name": "requested_date_words",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "requested_date_alternative": {
-          "name": "requested_date_alternative",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
         "total_cents": {
           "name": "total_cents",
           "type": "integer",
@@ -1028,6 +1035,24 @@
         },
         "so_number": {
           "name": "so_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_reason": {
+          "name": "decision_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1109,6 +1134,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "proposals_decided_by_users_id_fk": {
+          "name": "proposals_decided_by_users_id_fk",
+          "tableFrom": "proposals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1117,7 +1155,7 @@
       "checkConstraints": {
         "proposals_status_check": {
           "name": "proposals_status_check",
-          "value": "\"proposals\".\"status\" in ('open', 'released')"
+          "value": "\"proposals\".\"status\" in ('open', 'released', 'rejected', 'held')"
         }
       },
       "isRLSEnabled": false
