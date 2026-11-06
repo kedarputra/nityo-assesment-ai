@@ -13,18 +13,24 @@ export type FindSessionUser = (token: string) => Promise<SessionUser | null>;
 // Runs in the proxy in front of every request (security 3 and 7). A state-changing request
 // from another origin is refused before anything else; then every path but the public ones
 // needs a session that is valid in the database, not just a cookie that is present.
-export async function gateRequest(request: NextRequest, findSessionUser: FindSessionUser): Promise<NextResponse> {
+// `forwardedHeaders`, when given, replace the request's headers on the way to the page.
+export async function gateRequest(
+  request: NextRequest,
+  findSessionUser: FindSessionUser,
+  forwardedHeaders?: Headers,
+): Promise<NextResponse> {
   const isStateChanging = !SAFE_METHODS.has(request.method);
   if (isStateChanging && !isSameOrigin(request)) {
     return NextResponse.json({ error: "This request came from another site, so it was refused." }, { status: 403 });
   }
 
   const { pathname, search } = request.nextUrl;
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+  const passThrough = () => NextResponse.next(forwardedHeaders ? { request: { headers: forwardedHeaders } } : undefined);
+  if (PUBLIC_PATHS.has(pathname)) return passThrough();
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const user = token ? await findSessionUser(token) : null;
-  if (user) return NextResponse.next();
+  if (user) return passThrough();
 
   let response: NextResponse;
   if (isStateChanging || pathname.startsWith("/api/")) {
