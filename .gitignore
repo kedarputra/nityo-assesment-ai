@@ -8,7 +8,7 @@ node_modules/
 # Worktrees of this repo live inside it (AGENTS.md, "Branches"). Sandcastle's own
 # are under .sandcastle/worktrees/, ignored by .sandcastle/.gitignore.
 /.worktrees/
-/.claude/worktrees/
+/.claude/
 
 .vercel/
 .agents/
