@@ -8,7 +8,7 @@ import { ingestSnapshot, resetToSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e001Script } from "@/test/e001-script";
 
-// The role the app's login is a member of (drizzle/0005_app_role.sql).
+// The role the app's login is a member of (drizzle/0009_app_role.sql).
 const APP_ROLE = "harbor_point_app";
 
 // Drizzle wraps the driver's error, so look for Postgres's words along the cause chain.

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
 import {
@@ -6,22 +6,29 @@ import {
   customerContacts,
   customerPrices,
   customers,
-  draftReplies,
   incomingSupply,
   inventory,
+  noActionReasons,
+  productSearches,
   products,
+  proposals,
+  routeReasons,
   salesOrderLines,
   salesOrders,
   shipToAddresses,
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
+import { usualOrder } from "@/rules/order-history";
+import { searchCatalog } from "./product-search";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
+import { closeNoAction, routeToPerson, writeDraftReply } from "./requests";
 import { ToolError } from "./tool-error";
 
 // The agent's tools (security 5): the only way the model touches anything. Read tools read the
-// ERP; action tools write only Proposals, outcomes, flags and Draft replies. A release happens
-// only inside the gate that `propose_new_order` hands the order to, never on the model's say-so.
+// ERP; action tools write only Proposals, routed Requests, outcomes, notes, flags and Draft
+// replies. A release happens only inside the gate that `propose_new_order` hands the order to,
+// never on the model's say-so.
 
 export interface ToolContext {
   runId: string;
@@ -32,21 +39,16 @@ export interface ToolContext {
   now: () => Date;
 }
 
-// What a run learns from its action tools, beyond what they store.
-export interface RunState {
-  closedNoAction: string | null;
-}
-
 interface ToolSpec<Input extends z.ZodType> {
   name: string;
   description: string;
   input: Input;
-  run(tx: Database, context: ToolContext, input: z.infer<Input>, state: RunState): Promise<unknown>;
+  run(tx: Database, context: ToolContext, input: z.infer<Input>): Promise<unknown>;
 }
 
 // A call whose arguments passed the tool's schema, ready to run; or why they did not.
 export type ValidatedCall =
-  | { valid: true; run: (tx: Database, context: ToolContext, state: RunState) => Promise<unknown> }
+  | { valid: true; run: (tx: Database, context: ToolContext) => Promise<unknown> }
   | { valid: false; problems: string };
 
 export interface AgentTool {
@@ -65,13 +67,14 @@ function tool<Input extends z.ZodType>(spec: ToolSpec<Input>): AgentTool {
     validate(args) {
       const parsed = spec.input.safeParse(args);
       if (!parsed.success) return { valid: false, problems: z.prettifyError(parsed.error) };
-      return { valid: true, run: (tx, context, state) => spec.run(tx, context, parsed.data, state) };
+      return { valid: true, run: (tx, context) => spec.run(tx, context, parsed.data) };
     },
   };
 }
 
 const customerId = z.string().min(1).max(20).describe("A customer id, e.g. C001.");
 const sku = z.string().min(1).max(20).describe("A SKU, e.g. HPS-1408.");
+const emailId = z.string().regex(/^E\d{3}$/).describe("An email id, e.g. E015.");
 const quantity = z.number().int().positive().max(100_000).describe("Whole selling units.");
 
 const findCustomer = tool({
@@ -116,6 +119,41 @@ const getProduct = tool({
   async run(tx, _context, input) {
     const [product] = await tx.select().from(products).where(eq(products.sku, input.sku));
     return product ? { found: true, product } : { found: false };
+  },
+});
+
+const attribute = (example: string) =>
+  z.string().min(1).max(60).optional().describe(`In the catalog's English words, e.g. ${example}.`);
+
+const searchProducts = tool({
+  name: "search_products",
+  description:
+    "Find the SKU for a product the customer describes in words. Give what it is and any size, colour or material the customer stated, translated into the catalog's English words. Returns the ACTIVE candidates that fit every attribute (exactly one is a confident match), near matches when none fit, and any DISCONTINUED product that fits with its replacement. Cite the result's searchId on the order line.",
+  input: z.strictObject({
+    description: z
+      .string()
+      .min(1)
+      .max(100)
+      .describe("What the product is, in the catalog's English words, e.g. \"toilet tissue\" or \"trash liners\"."),
+    size: attribute("\"jumbo\", \"55 gal\", \"large\", \"1000 ml\""),
+    colour: attribute("\"white\" or \"black\""),
+    material: attribute("\"nitrile\" or \"vinyl\""),
+  }),
+  async run(tx, context, input) {
+    const catalog = await tx.select().from(products);
+    const result = searchCatalog(catalog, input);
+    const [search] = await tx
+      .insert(productSearches)
+      .values({
+        runId: context.runId,
+        emailId: context.emailId,
+        query: input,
+        candidateSkus: result.candidates.map((candidate) => candidate.sku),
+        discontinuedSkus: result.discontinued.map((product) => product.sku),
+      })
+      .returning({ id: productSearches.id });
+    if (!search) throw new Error("The search was not stored.");
+    return { searchId: search.id, confident: result.candidates.length === 1, ...result };
   },
 });
 
@@ -167,14 +205,16 @@ const checkCredit = tool({
 
 const getOrders = tool({
   name: "get_orders",
-  description: "A customer's sales orders with their lines, newest first; optionally only those with a given customer PO.",
+  description:
+    "A customer's sales orders with their lines, newest first; optionally only those with a given customer PO. An order released from an email today names that email in fromEmailId.",
   input: z.strictObject({ customer_id: customerId, customer_po: z.string().min(1).max(60).optional() }),
   async run(tx, _context, input) {
     const conditions = [eq(salesOrders.customerId, input.customer_id)];
     if (input.customer_po) conditions.push(eq(salesOrders.customerPo, input.customer_po));
     const orders = await tx
-      .select()
+      .select({ ...getTableColumns(salesOrders), fromEmailId: proposals.emailId })
       .from(salesOrders)
+      .leftJoin(proposals, eq(proposals.soNumber, salesOrders.soNumber))
       .where(and(...conditions))
       .orderBy(desc(salesOrders.orderDate), desc(salesOrders.soNumber))
       .limit(10);
@@ -196,6 +236,32 @@ const getOrders = tool({
   },
 });
 
+const getUsualOrder = tool({
+  name: "get_usual_order",
+  description:
+    "What \"same as last time\" and \"the usual\" mean for a customer, worked out from their recent sales orders: the latest order's lines, the lines common to the recent orders (the usual), and the lines on only some of them, to offer in the reply rather than add.",
+  input: z.strictObject({ customer_id: customerId }),
+  async run(tx, _context, input) {
+    const orders = await tx
+      .select({ soNumber: salesOrders.soNumber, orderDate: salesOrders.orderDate })
+      .from(salesOrders)
+      .where(eq(salesOrders.customerId, input.customer_id));
+    const lines =
+      orders.length === 0
+        ? []
+        : await tx
+            .select({ soNumber: salesOrderLines.soNumber, sku: salesOrderLines.sku, qtyOrdered: salesOrderLines.qtyOrdered })
+            .from(salesOrderLines)
+            .where(
+              inArray(
+                salesOrderLines.soNumber,
+                orders.map((order) => order.soNumber),
+              ),
+            );
+    return usualOrder(orders.map((order) => ({ ...order, lines: lines.filter((line) => line.soNumber === order.soNumber) })));
+  },
+});
+
 const proposeNewOrderTool = tool({
   name: "propose_new_order",
   description:
@@ -203,7 +269,15 @@ const proposeNewOrderTool = tool({
   input: z.strictObject({
     customer_id: customerId,
     ship_to_id: z.string().min(1).max(20),
-    requested_date: z.iso.date().describe("The delivery date the customer asked for, YYYY-MM-DD."),
+    requested_date: z.iso
+      .date()
+      .describe("The delivery date the customer asked for, YYYY-MM-DD; when the email names none, the date you propose."),
+    requested_date_words: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("The email's own words for the date, verbatim (\"next Tuesday\", \"by Friday October 30\"). The system reads them itself."),
     customer_po: z.string().min(1).max(60).nullable().optional(),
     lines: z
       .array(
@@ -217,6 +291,33 @@ const proposeNewOrderTool = tool({
             .optional()
             .describe("Only if the email names a price per selling unit, in cents."),
           customer_words: z.string().max(200).optional().describe("How the customer wrote this line."),
+          from_sales_order: z
+            .string()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe("The earlier sales order this line repeats, when the email asks for the usual or the same as last time."),
+          search_id: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("The search_products result this SKU was chosen from, when the customer described the product in words."),
+          unit_as_written: z
+            .string()
+            .min(1)
+            .max(40)
+            .optional()
+            .describe("The unit the customer wrote, as written (\"cases\", \"boxes\", \"rollos\"), if they wrote one."),
+          quantity_as_written: z
+            .number()
+            .positive()
+            .max(100_000)
+            .optional()
+            .describe("The amount the customer wrote, when it differs from the whole selling units in quantity."),
+          replaces_sku: sku
+            .optional()
+            .describe("The DISCONTINUED SKU the customer asked for, when this line is its replacement."),
         }),
       )
       .min(1)
@@ -236,12 +337,18 @@ const proposeNewOrderTool = tool({
         customerId: input.customer_id,
         shipToId: input.ship_to_id,
         requestedDate: input.requested_date,
+        requestedDateWords: input.requested_date_words ?? null,
         customerPo: input.customer_po ?? null,
         lines: input.lines.map((line) => ({
           sku: line.sku,
           quantity: line.quantity,
           statedUnitPriceCents: line.stated_unit_price_cents ?? null,
           customerWords: line.customer_words ?? null,
+          fromSalesOrder: line.from_sales_order ?? null,
+          productSearchId: line.search_id ?? null,
+          unitAsWritten: line.unit_as_written ?? null,
+          quantityAsWritten: line.quantity_as_written ?? null,
+          replacesSku: line.replaces_sku ?? null,
         })),
       },
     );
@@ -249,6 +356,8 @@ const proposeNewOrderTool = tool({
       proposalId: result.proposalId,
       outcome: result.verdict === "released" ? `released as ${result.soNumber}` : "waiting for a person to review",
       soNumber: result.soNumber,
+      requestedDate: result.requestedDate,
+      requestedDateAlternative: result.requestedDateAlternative,
       totalCents: result.totalCents,
       failingChecks: result.checks.filter((check) => !check.passes),
     };
@@ -258,14 +367,10 @@ const proposeNewOrderTool = tool({
 const draftReply = tool({
   name: "draft_reply",
   description:
-    "Write the reply to the customer, in their language, for a person to approve. It is never sent by the system. Call it once, after the order's outcome is known.",
+    "Write the reply to the customer, in their language, for a person to approve. It is never sent by the system. An email has one Draft reply: call it once, after the outcome is known, unless route_to_person already wrote it.",
   input: z.strictObject({ body: z.string().min(1).max(5000) }),
   async run(tx, context, input) {
-    const [reply] = await tx
-      .insert(draftReplies)
-      .values({ runId: context.runId, emailId: context.emailId, body: input.body })
-      .returning({ id: draftReplies.id });
-    return { draftReplyId: reply?.id };
+    return { draftReplyId: await writeDraftReply(tx, context, input.body) };
   },
 });
 
@@ -286,13 +391,36 @@ const raiseFlag = tool({
   },
 });
 
-const closeNoAction = tool({
+const routeToPersonTool = tool({
+  name: "route_to_person",
+  description:
+    "Send a Request the ERP cannot act on to a person, with a summary for them and the Draft reply to the customer. Reasons: quote (a quote request), return, billing (a billing dispute), inquiry (a question about an order), prospect (a company that is not a customer), no-quantities (an order that names no quantities; never invent them), missing-attachment (an order whose attachment is not there; ask for it again). It changes nothing in the ERP. An email that also has an order calls this beside propose_new_order.",
+  input: z.strictObject({
+    reason: z.enum(routeReasons),
+    summary: z.string().min(1).max(1000).describe("What the person needs to know and decide, in plain words."),
+    reply: z
+      .string()
+      .min(1)
+      .max(5000)
+      .optional()
+      .describe("The email's one Draft reply, covering everything it asks. Leave out only if draft_reply already wrote it."),
+  }),
+  async run(tx, context, input) {
+    return routeToPerson(tx, context, { reason: input.reason, summary: input.summary, reply: input.reply ?? null });
+  },
+});
+
+const closeNoActionTool = tool({
   name: "close_no_action",
-  description: "Close an email that needs nothing from Harbor Point (spam, an auto-reply, a duplicate), with the reason.",
-  input: z.strictObject({ reason: z.string().min(1).max(500) }),
-  async run(_tx, _context, input, state) {
-    state.closedNoAction = input.reason;
-    return { closed: true };
+  description:
+    "Close an email that needs nothing from Harbor Point: spam, an auto-reply, or a duplicate of an earlier email whose order is already in the system (the same customer PO, or every line the same). A duplicate names the earlier email. An auto-reply's note is attached to the sender's open Requests, so write in it what a person should know (who is away until when, whom to call). No Draft reply.",
+  input: z.strictObject({
+    reason: z.enum(noActionReasons),
+    note: z.string().min(1).max(500).describe("Why, in a sentence; for an auto-reply, what it tells us."),
+    duplicate_of: emailId.optional().describe("For a duplicate: the earlier email it repeats."),
+  }),
+  async run(tx, context, input) {
+    return closeNoAction(tx, context, { reason: input.reason, note: input.note, duplicateOf: input.duplicate_of ?? null });
   },
 });
 
@@ -300,14 +428,17 @@ export const agentTools: readonly AgentTool[] = [
   findCustomer,
   listShipTos,
   getProduct,
+  searchProducts,
   priceLine,
   checkStock,
   checkCredit,
   getOrders,
+  getUsualOrder,
   proposeNewOrderTool,
   draftReply,
   raiseFlag,
-  closeNoAction,
+  routeToPersonTool,
+  closeNoActionTool,
 ];
 
 export function findTool(name: string): AgentTool | undefined {

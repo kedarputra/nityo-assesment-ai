@@ -1,5 +1,5 @@
 {
-  "id": "9cf84464-b306-4b64-9464-c6bb5cc0c324",
+  "id": "80833c9e-acc7-4c8e-83b2-ef37c048e21f",
   "prevId": "b919b5ba-5ac5-4f0e-bd64-a0157596200e",
   "version": "7",
   "dialect": "postgresql",
@@ -51,28 +51,28 @@
         "agent_flags_run_id_agent_runs_run_id_fk": {
           "name": "agent_flags_run_id_agent_runs_run_id_fk",
           "tableFrom": "agent_flags",
+          "tableTo": "agent_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "agent_runs",
           "columnsTo": [
             "run_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "agent_flags_email_id_emails_email_id_fk": {
           "name": "agent_flags_email_id_emails_email_id_fk",
           "tableFrom": "agent_flags",
+          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "emails",
           "columnsTo": [
             "email_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -174,24 +174,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "agent_runs_email_id_emails_email_id_fk": {
           "name": "agent_runs_email_id_emails_email_id_fk",
           "tableFrom": "agent_runs",
+          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "emails",
           "columnsTo": [
             "email_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -306,50 +306,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "audit_events_user_id_users_id_fk": {
           "name": "audit_events_user_id_users_id_fk",
           "tableFrom": "audit_events",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "audit_events_email_id_emails_email_id_fk": {
           "name": "audit_events_email_id_emails_email_id_fk",
           "tableFrom": "audit_events",
+          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "emails",
           "columnsTo": [
             "email_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "audit_events_run_id_agent_runs_run_id_fk": {
           "name": "audit_events_run_id_agent_runs_run_id_fk",
           "tableFrom": "audit_events",
+          "tableTo": "agent_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "agent_runs",
           "columnsTo": [
             "run_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -403,15 +403,15 @@
         "customer_contacts_customer_id_customers_customer_id_fk": {
           "name": "customer_contacts_customer_id_customers_customer_id_fk",
           "tableFrom": "customer_contacts",
+          "tableTo": "customers",
           "columnsFrom": [
             "customer_id"
           ],
-          "tableTo": "customers",
           "columnsTo": [
             "customer_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -466,28 +466,28 @@
         "customer_prices_customer_id_customers_customer_id_fk": {
           "name": "customer_prices_customer_id_customers_customer_id_fk",
           "tableFrom": "customer_prices",
+          "tableTo": "customers",
           "columnsFrom": [
             "customer_id"
           ],
-          "tableTo": "customers",
           "columnsTo": [
             "customer_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "customer_prices_sku_products_sku_fk": {
           "name": "customer_prices_sku_products_sku_fk",
           "tableFrom": "customer_prices",
+          "tableTo": "products",
           "columnsFrom": [
             "sku"
           ],
-          "tableTo": "products",
           "columnsTo": [
             "sku"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -574,6 +574,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "ready_by": {
+          "name": "ready_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ready_at": {
+          "name": "ready_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -587,28 +599,41 @@
         "draft_replies_run_id_agent_runs_run_id_fk": {
           "name": "draft_replies_run_id_agent_runs_run_id_fk",
           "tableFrom": "draft_replies",
+          "tableTo": "agent_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "agent_runs",
           "columnsTo": [
             "run_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "draft_replies_email_id_emails_email_id_fk": {
           "name": "draft_replies_email_id_emails_email_id_fk",
           "tableFrom": "draft_replies",
+          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "emails",
           "columnsTo": [
             "email_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "draft_replies_ready_by_users_id_fk": {
+          "name": "draft_replies_ready_by_users_id_fk",
+          "tableFrom": "draft_replies",
+          "tableTo": "users",
+          "columnsFrom": [
+            "ready_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -712,15 +737,15 @@
         "incoming_supply_sku_products_sku_fk": {
           "name": "incoming_supply_sku_products_sku_fk",
           "tableFrom": "incoming_supply",
+          "tableTo": "products",
           "columnsFrom": [
             "sku"
           ],
-          "tableTo": "products",
           "columnsTo": [
             "sku"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -757,8 +782,8 @@
           "primaryKey": false,
           "notNull": true,
           "generated": {
-            "type": "stored",
-            "as": "on_hand - allocated"
+            "as": "on_hand - allocated",
+            "type": "stored"
           }
         }
       },
@@ -767,15 +792,15 @@
         "inventory_sku_products_sku_fk": {
           "name": "inventory_sku_products_sku_fk",
           "tableFrom": "inventory",
+          "tableTo": "products",
           "columnsFrom": [
             "sku"
           ],
-          "tableTo": "products",
           "columnsTo": [
             "sku"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -844,15 +869,15 @@
         "products_replaced_by_products_sku_fk": {
           "name": "products_replaced_by_products_sku_fk",
           "tableFrom": "products",
+          "tableTo": "products",
           "columnsFrom": [
             "replaced_by"
           ],
-          "tableTo": "products",
           "columnsTo": [
             "sku"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -919,15 +944,15 @@
         "proposal_lines_proposal_id_proposals_id_fk": {
           "name": "proposal_lines_proposal_id_proposals_id_fk",
           "tableFrom": "proposal_lines",
+          "tableTo": "proposals",
           "columnsFrom": [
             "proposal_id"
           ],
-          "tableTo": "proposals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1014,6 +1039,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_reason": {
+          "name": "decision_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1034,63 +1077,76 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "proposals_run_id_agent_runs_run_id_fk": {
           "name": "proposals_run_id_agent_runs_run_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "agent_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "agent_runs",
           "columnsTo": [
             "run_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_email_id_emails_email_id_fk": {
           "name": "proposals_email_id_emails_email_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "emails",
           "columnsTo": [
             "email_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_customer_id_customers_customer_id_fk": {
           "name": "proposals_customer_id_customers_customer_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "customers",
           "columnsFrom": [
             "customer_id"
           ],
-          "tableTo": "customers",
           "columnsTo": [
             "customer_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_so_number_sales_orders_so_number_fk": {
           "name": "proposals_so_number_sales_orders_so_number_fk",
           "tableFrom": "proposals",
+          "tableTo": "sales_orders",
           "columnsFrom": [
             "so_number"
           ],
-          "tableTo": "sales_orders",
           "columnsTo": [
             "so_number"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "proposals_decided_by_users_id_fk": {
+          "name": "proposals_decided_by_users_id_fk",
+          "tableFrom": "proposals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1099,7 +1155,7 @@
       "checkConstraints": {
         "proposals_status_check": {
           "name": "proposals_status_check",
-          "value": "\"proposals\".\"status\" in ('open', 'released')"
+          "value": "\"proposals\".\"status\" in ('open', 'released', 'rejected', 'held')"
         }
       },
       "isRLSEnabled": false
@@ -1150,28 +1206,28 @@
         "sales_order_lines_so_number_sales_orders_so_number_fk": {
           "name": "sales_order_lines_so_number_sales_orders_so_number_fk",
           "tableFrom": "sales_order_lines",
+          "tableTo": "sales_orders",
           "columnsFrom": [
             "so_number"
           ],
-          "tableTo": "sales_orders",
           "columnsTo": [
             "so_number"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "sales_order_lines_sku_products_sku_fk": {
           "name": "sales_order_lines_sku_products_sku_fk",
           "tableFrom": "sales_order_lines",
+          "tableTo": "products",
           "columnsFrom": [
             "sku"
           ],
-          "tableTo": "products",
           "columnsTo": [
             "sku"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1241,28 +1297,28 @@
         "sales_orders_customer_id_customers_customer_id_fk": {
           "name": "sales_orders_customer_id_customers_customer_id_fk",
           "tableFrom": "sales_orders",
+          "tableTo": "customers",
           "columnsFrom": [
             "customer_id"
           ],
-          "tableTo": "customers",
           "columnsTo": [
             "customer_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "sales_orders_ship_to_id_ship_to_addresses_ship_to_id_fk": {
           "name": "sales_orders_ship_to_id_ship_to_addresses_ship_to_id_fk",
           "tableFrom": "sales_orders",
+          "tableTo": "ship_to_addresses",
           "columnsFrom": [
             "ship_to_id"
           ],
-          "tableTo": "ship_to_addresses",
           "columnsTo": [
             "ship_to_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1313,24 +1369,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1379,15 +1435,15 @@
         "ship_to_addresses_customer_id_customers_customer_id_fk": {
           "name": "ship_to_addresses_customer_id_customers_customer_id_fk",
           "tableFrom": "ship_to_addresses",
+          "tableTo": "customers",
           "columnsFrom": [
             "customer_id"
           ],
-          "tableTo": "customers",
           "columnsTo": [
             "customer_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1481,10 +1537,10 @@
       "uniqueConstraints": {
         "users_username_unique": {
           "name": "users_username_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "username"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1533,10 +1589,10 @@
     }
   },
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

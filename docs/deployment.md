@@ -74,7 +74,7 @@ transaction mode is safe. Migrations, the seeds and the Reset use the **direct**
 ### The app's database role
 
 The audit log is append-only in the database (security 6). Migration
-[`0005_app_role.sql`](../drizzle/0005_app_role.sql) creates `harbor_point_app`, a role without a
+[`0009_app_role.sql`](../drizzle/0009_app_role.sql) creates `harbor_point_app`, a role without a
 login that may read and write every table but may only INSERT and SELECT on `audit_events`. The
 app must connect as a login that is a member of it, not as the owner the integration injects:
 

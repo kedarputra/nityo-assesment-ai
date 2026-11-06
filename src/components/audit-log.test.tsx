@@ -48,4 +48,25 @@ describe("AuditLog", () => {
     expect(html).toContain("<td>Agent, started by ops.reviewer</td><td>Started reading</td>");
     expect(html.indexOf("SO-24059")).toBeLessThan(html.indexOf("find_customer"));
   });
+
+  it("names a person's decisions: overrides with their note, approvals, rejections with their reason, and undo", () => {
+    const person = { at, actor: "person" as const, username: "ops.reviewer", emailId: "E019" };
+    const events: AuditEntry[] = [
+      { ...person, id: 5, action: "release.undone", detail: { soNumber: "SO-24060" } },
+      { ...person, id: 4, action: "proposal.approved", detail: { soNumber: "SO-24060", totalCents: 27200 } },
+      { ...person, id: 3, action: "proposal.override", detail: { check: "no-flags", note: "James confirmed nitrile." } },
+      { ...person, id: 2, action: "proposal.rejected", detail: { reason: "<i>Cancelled</i> by phone." } },
+      { ...person, id: 1, action: "proposal.edited", detail: { edit: { kind: "quantity", lineNo: 1, quantity: 6 } } },
+    ];
+
+    const html = renderToStaticMarkup(<AuditLog events={events} />);
+
+    expect(html).toContain("<td>ops.reviewer</td><td>Undid the release of SO-24060</td>");
+    expect(html).toContain("<td>Approved and released SO-24060</td>");
+    expect(html).toContain("Order total $272.00");
+    expect(html).toContain("<td>Overrode “Nothing flagged”</td>");
+    expect(html).toContain("James confirmed nitrile.");
+    expect(html).toContain("&lt;i&gt;Cancelled&lt;/i&gt; by phone.");
+    expect(html).toContain("<td>Edited the Proposal</td>");
+  });
 });

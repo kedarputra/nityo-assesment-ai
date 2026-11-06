@@ -199,12 +199,30 @@ export const signInThrottle = pgTable("sign_in_throttle", {
 
 // ---- The agent's work -----------------------------------------------------------------------------
 
-// `routed`: the agent flagged the email for a person without proposing an ERP change.
+// `routed`: the agent sent a Request to a person with a summary, without proposing an ERP change.
 export const agentRunOutcomes = ["released", "proposal", "routed", "no_action", "failed"] as const;
 export type AgentRunOutcome = (typeof agentRunOutcomes)[number];
 
 export const gateVerdicts = ["released", "review"] as const;
 export type GateVerdict = (typeof gateVerdicts)[number];
+
+// The categories of a Request (CONTEXT.md), in the order the desk lists them.
+export const requestKinds = [
+  "new order",
+  "order change",
+  "cancellation",
+  "return",
+  "billing dispute",
+  "quote request",
+  "order inquiry",
+  "no action",
+] as const;
+export type RequestKind = (typeof requestKinds)[number];
+
+// Why an email needs nothing from Harbor Point (the walkthrough's `SPAM`, `AUTO-REPLY` and
+// `P6-duplicate`).
+export const noActionReasons = ["spam", "auto-reply", "duplicate"] as const;
+export type NoActionReason = (typeof noActionReasons)[number];
 
 // One Agent run over one Email (speed and observability: the Agent run record). A run with no
 // `ended_at` is still reading. Cost is integer micro-dollars, so it is never a float.
@@ -225,15 +243,32 @@ export const agentRuns = pgTable(
     outcome: text("outcome", { enum: agentRunOutcomes }),
     gateVerdict: text("gate_verdict", { enum: gateVerdicts }),
     errorClass: text("error_class"),
+    // Every Request the email carries, recorded when the run finishes; E027 carries two.
+    requestKinds: text("request_kinds", { enum: requestKinds }).array().notNull().default(sql`'{}'::text[]`),
+    // Set by `close_no_action`; a duplicate names the email it repeats.
+    noActionReason: text("no_action_reason", { enum: noActionReasons }),
+    noActionNote: text("no_action_note"),
+    duplicateOfEmailId: text("duplicate_of_email_id").references(() => emails.emailId),
   },
   (table) => [
     index("agent_runs_email_id_idx").on(table.emailId),
     check("agent_runs_outcome_check", sql`${table.outcome} in ('released', 'proposal', 'routed', 'no_action', 'failed')`),
     check("agent_runs_gate_verdict_check", sql`${table.gateVerdict} in ('released', 'review')`),
+    check(
+      "agent_runs_request_kinds_check",
+      sql`${table.requestKinds} <@ array['new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry', 'no action']::text[]`,
+    ),
+    check("agent_runs_no_action_reason_check", sql`${table.noActionReason} in ('spam', 'auto-reply', 'duplicate')`),
+    check(
+      "agent_runs_duplicate_of_check",
+      sql`(${table.noActionReason} is not distinct from 'duplicate') = (${table.duplicateOfEmailId} is not null)`,
+    ),
   ],
 );
 
-export const proposalStatuses = ["open", "released"] as const;
+// `held` waits on something outside the desk and can still be decided; `rejected` is final, and so
+// is `released` once its 10-second Undo has passed.
+export const proposalStatuses = ["open", "released", "rejected", "held"] as const;
 export type ProposalStatus = (typeof proposalStatuses)[number];
 
 // One release check's result, as the gate recorded it.
@@ -241,6 +276,10 @@ export interface RecordedCheck {
   check: string;
   passes: boolean;
   detail: string;
+  // The review reasons a failing check stands for, e.g. `P2-short-stock` and `DATE-unmeetable`.
+  flags?: string[];
+  // What a person can do about it, e.g. a partial shipment, a backorder or declining.
+  choices?: string[];
 }
 
 // A new order the agent proposed. The gate either released it (`so_number` set) or left it open
@@ -262,15 +301,24 @@ export const proposals = pgTable(
     shipToId: text("ship_to_id").notNull(),
     customerPo: text("customer_po"),
     requestedDate: date("requested_date").notNull(),
+    // The customer's own words for the date, when they gave any (U11).
+    requestedDateWords: text("requested_date_words"),
+    // The other date ambiguous words could mean, e.g. "next Tuesday": 3 or 10 Nov.
+    requestedDateAlternative: date("requested_date_alternative"),
     totalCents: integer("total_cents").notNull(),
     status: text("status", { enum: proposalStatuses }).notNull(),
     checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
     soNumber: text("so_number").references(() => salesOrders.soNumber),
+    // The person's decision: who, when, and the reason a reject or a hold requires. Null while
+    // open, and on a release the gate made alone.
+    decidedBy: integer("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("proposals_email_id_idx").on(table.emailId),
-    check("proposals_status_check", sql`${table.status} in ('open', 'released')`),
+    check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held')`),
   ],
 );
 
@@ -289,9 +337,31 @@ export const proposalLines = pgTable(
     priceSource: text("price_source", { enum: ["contract", "list"] }),
     statedPriceCents: integer("stated_price_cents"),
     customerWords: text("customer_words"),
+    // The earlier sales order a line repeats ("same as last time", "the usual").
+    fromSalesOrder: text("from_sales_order"),
+    // The search this line was chosen from, when the customer described the product in words.
+    productSearchId: integer("product_search_id").references(() => productSearches.id),
+    // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
+    replacesSku: text("replaces_sku"),
   },
   (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
 );
+
+// A `search_products` call and what it found, so the gate can check that a described line cites a
+// search that left exactly one ACTIVE candidate (U18), rather than take the model's word for it.
+export const productSearches = pgTable("product_searches", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  query: jsonb("query").$type<Record<string, string>>().notNull(),
+  candidateSkus: jsonb("candidate_skus").$type<string[]>().notNull(),
+  discontinuedSkus: jsonb("discontinued_skus").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const agentFlags = pgTable("agent_flags", {
   id: serial("id").primaryKey(),
@@ -306,7 +376,64 @@ export const agentFlags = pgTable("agent_flags", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// A reply the agent wrote for a person to edit and approve. It is never sent.
+// Why a Request goes to a person rather than to the ERP: its kind's `ROUTE-…` code, or a new
+// order the agent cannot propose (`NO-QTY`, `MISSING-ATTACHMENT`).
+export const routeReasons = ["quote", "return", "billing", "inquiry", "prospect", "no-quantities", "missing-attachment"] as const;
+export type RouteReason = (typeof routeReasons)[number];
+
+// A Request the agent sent to a person with a summary; no ERP change is prepared for it.
+export const routedRequests = pgTable(
+  "routed_requests",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    kind: text("kind", { enum: requestKinds }).notNull(),
+    reason: text("reason", { enum: routeReasons }).notNull(),
+    summary: text("summary").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("routed_requests_email_id_idx").on(table.emailId),
+    check(
+      "routed_requests_kind_check",
+      sql`${table.kind} in ('new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry')`,
+    ),
+    check(
+      "routed_requests_reason_check",
+      sql`${table.reason} in ('quote', 'return', 'billing', 'inquiry', 'prospect', 'no-quantities', 'missing-attachment')`,
+    ),
+  ],
+);
+
+// Information one email carries for another email's open Requests, for the reviewer (U17: an
+// auto-reply's "away until 9 Nov" lands on the sender's open Requests). It never changes them.
+export const emailNotes = pgTable(
+  "email_notes",
+  {
+    id: serial("id").primaryKey(),
+    // The email the note is shown on.
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    sourceEmailId: text("source_email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    note: text("note").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("email_notes_email_id_idx").on(table.emailId)],
+);
+
+// A reply the agent wrote for a person to edit and approve. It is never sent. Once a person marks
+// it ready, it is locked.
 export const draftReplies = pgTable("draft_replies", {
   id: serial("id").primaryKey(),
   runId: text("run_id")
@@ -316,6 +443,8 @@ export const draftReplies = pgTable("draft_replies", {
     .notNull()
     .references(() => emails.emailId),
   body: text("body").notNull(),
+  readyBy: integer("ready_by").references(() => users.id),
+  readyAt: timestamp("ready_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

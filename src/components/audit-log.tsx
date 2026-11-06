@@ -1,6 +1,7 @@
 import { formatBusinessDay, formatBusinessTime } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
 import type { AuditEntry } from "@/server/audit/audit-log";
+import { checkName } from "./inbox/checks";
 
 // The audit log (DESIGN.md, "Audit log"): when, who, what, which email, and the detail, newest
 // first. Details hold what the model sent, so they are rendered only as text (security 4).
@@ -82,9 +83,28 @@ function what(event: AuditEntry): string {
     case "tool.refused":
       return `Refused a call to ${tool}`;
     case "gate.verdict":
+      if (event.detail.recheck === true) {
+        return event.detail.verdict === "released" ? "Re-checked: every check passed" : "Re-checked: still waiting";
+      }
       return event.detail.verdict === "released" ? "Every check passed" : "Sent to review";
     case "order.released":
       return `Released ${String(event.detail.soNumber)}`;
+    case "proposal.edited":
+      return "Edited the Proposal";
+    case "proposal.override":
+      return `Overrode “${checkName(String(event.detail.check))}”`;
+    case "proposal.approved":
+      return `Approved and released ${String(event.detail.soNumber)}`;
+    case "proposal.approval_refused":
+      return "Approval refused";
+    case "proposal.rejected":
+      return "Rejected";
+    case "proposal.held":
+      return "Put on hold";
+    case "release.undone":
+      return `Undid the release of ${String(event.detail.soNumber)}`;
+    case "reply.ready":
+      return "Marked the reply ready";
     default:
       return event.action;
   }
@@ -100,7 +120,15 @@ function detailOf(event: AuditEntry): string {
       return clip(JSON.stringify(detail.input ?? {}) + (typeof detail.problem === "string" ? ` — ${detail.problem}` : ""));
     case "gate.verdict":
     case "order.released":
+    case "proposal.approved":
       return typeof detail.totalCents === "number" ? `Order total ${formatUsd(detail.totalCents)}` : "";
+    case "proposal.override":
+      return clip(String(detail.note));
+    case "proposal.rejected":
+    case "proposal.held":
+      return clip(String(detail.reason));
+    case "proposal.edited":
+      return clip(JSON.stringify(detail.edit ?? {}));
     default:
       return clip(JSON.stringify(detail));
   }
