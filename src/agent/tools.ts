@@ -9,6 +9,7 @@ import {
   draftReplies,
   incomingSupply,
   inventory,
+  productSearches,
   products,
   salesOrderLines,
   salesOrders,
@@ -16,6 +17,7 @@ import {
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
+import { searchCatalog } from "./product-search";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
 import { ToolError } from "./tool-error";
 
@@ -119,6 +121,41 @@ const getProduct = tool({
   },
 });
 
+const attribute = (example: string) =>
+  z.string().min(1).max(60).optional().describe(`In the catalog's English words, e.g. ${example}.`);
+
+const searchProducts = tool({
+  name: "search_products",
+  description:
+    "Find the SKU for a product the customer describes in words. Give what it is and any size, colour or material the customer stated, translated into the catalog's English words. Returns the ACTIVE candidates that fit every attribute (exactly one is a confident match), near matches when none fit, and any DISCONTINUED product that fits with its replacement. Cite the result's searchId on the order line.",
+  input: z.strictObject({
+    description: z
+      .string()
+      .min(1)
+      .max(100)
+      .describe("What the product is, in the catalog's English words, e.g. \"toilet tissue\" or \"trash liners\"."),
+    size: attribute("\"jumbo\", \"55 gal\", \"large\", \"1000 ml\""),
+    colour: attribute("\"white\" or \"black\""),
+    material: attribute("\"nitrile\" or \"vinyl\""),
+  }),
+  async run(tx, context, input) {
+    const catalog = await tx.select().from(products);
+    const result = searchCatalog(catalog, input);
+    const [search] = await tx
+      .insert(productSearches)
+      .values({
+        runId: context.runId,
+        emailId: context.emailId,
+        query: input,
+        candidateSkus: result.candidates.map((candidate) => candidate.sku),
+        discontinuedSkus: result.discontinued.map((product) => product.sku),
+      })
+      .returning({ id: productSearches.id });
+    if (!search) throw new Error("The search was not stored.");
+    return { searchId: search.id, confident: result.candidates.length === 1, ...result };
+  },
+});
+
 const priceLine = tool({
   name: "price_line",
   description:
@@ -217,6 +254,27 @@ const proposeNewOrderTool = tool({
             .optional()
             .describe("Only if the email names a price per selling unit, in cents."),
           customer_words: z.string().max(200).optional().describe("How the customer wrote this line."),
+          search_id: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("The search_products result this SKU was chosen from, when the customer described the product in words."),
+          unit_as_written: z
+            .string()
+            .min(1)
+            .max(40)
+            .optional()
+            .describe("The unit the customer wrote, as written (\"cases\", \"boxes\", \"rollos\"), if they wrote one."),
+          quantity_as_written: z
+            .number()
+            .positive()
+            .max(100_000)
+            .optional()
+            .describe("The amount the customer wrote, when it differs from the whole selling units in quantity."),
+          replaces_sku: sku
+            .optional()
+            .describe("The DISCONTINUED SKU the customer asked for, when this line is its replacement."),
         }),
       )
       .min(1)
@@ -242,6 +300,10 @@ const proposeNewOrderTool = tool({
           quantity: line.quantity,
           statedUnitPriceCents: line.stated_unit_price_cents ?? null,
           customerWords: line.customer_words ?? null,
+          productSearchId: line.search_id ?? null,
+          unitAsWritten: line.unit_as_written ?? null,
+          quantityAsWritten: line.quantity_as_written ?? null,
+          replacesSku: line.replaces_sku ?? null,
         })),
       },
     );
@@ -300,6 +362,7 @@ export const agentTools: readonly AgentTool[] = [
   findCustomer,
   listShipTos,
   getProduct,
+  searchProducts,
   priceLine,
   checkStock,
   checkCredit,

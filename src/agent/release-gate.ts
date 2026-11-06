@@ -5,7 +5,9 @@ import {
   customerContacts,
   customerPrices,
   customers,
+  emails,
   inventory,
+  productSearches,
   products,
   proposalLines,
   proposals,
@@ -18,6 +20,7 @@ import {
 import { formatUsd } from "@/lib/money";
 import { creditCheck, orderValue, priceFor, sellability, type Price } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
+import { sellingUnitFits, skuCodesIn } from "./product-search";
 import { ToolError } from "./tool-error";
 
 // The release gate (ADR 0001): code, not the model, decides whether a proposed new order is a
@@ -28,6 +31,9 @@ import { ToolError } from "./tool-error";
 export const releaseChecks = [
   "known-contact",
   "skus-sellable",
+  "no-substitution",
+  "confident-skus",
+  "selling-units",
   "system-price",
   "full-stock",
   "credit-hold",
@@ -43,6 +49,13 @@ export interface ProposedLine {
   // A price the email or the model named, per selling unit; compared with the system's price.
   statedUnitPriceCents: number | null;
   customerWords: string | null;
+  // The `search_products` call the SKU was chosen from, when the customer described it in words.
+  productSearchId: number | null;
+  // The unit and amount the customer wrote, when they differ from whole selling units (U1).
+  unitAsWritten: string | null;
+  quantityAsWritten: number | null;
+  // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
+  replacesSku: string | null;
 }
 
 export interface ProposedNewOrder {
@@ -69,10 +82,21 @@ export interface GateResult {
   checks: RecordedCheck[];
 }
 
+type Product = typeof products.$inferSelect;
+
 interface PricedLine extends ProposedLine {
+  product: Product | null;
   price: Price | null;
   sellable: boolean;
   available: number | null;
+  // The product this line replaces, with its system price, when it is a substitution.
+  replaced: { product: Product; price: Price } | null;
+}
+
+interface CitedSearch {
+  runId: string;
+  candidateSkus: string[];
+  discontinuedSkus: string[];
 }
 
 // Releases are serialised, so two runs never allocate the same stock or take the same SO number.
@@ -86,6 +110,8 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
   const [customer] = await tx.select().from(customers).where(eq(customers.customerId, order.customerId));
   if (!customer) throw new ToolError(`There is no customer ${order.customerId}.`);
 
+  const [email] = await tx.select({ body: emails.body }).from(emails).where(eq(emails.emailId, context.emailId));
+  const codesInEmail = skuCodesIn(email?.body ?? "");
   const lines = await priceLines(tx, order, context.orderDate);
   const pricedLines = lines.flatMap((line) =>
     line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : [],
@@ -102,6 +128,14 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     .where(and(eq(shipToAddresses.shipToId, order.shipToId), eq(shipToAddresses.customerId, customer.customerId)));
   const flags = await tx.select({ code: agentFlags.code }).from(agentFlags).where(eq(agentFlags.runId, context.runId));
   const releasedTodayCents = await releasedTodayFor(tx, customer.customerId);
+  const searches = await citedSearches(tx, lines);
+  const catalogCodes =
+    codesInEmail.length === 0
+      ? []
+      : await tx
+          .select({ sku: products.sku, status: products.status })
+          .from(products)
+          .where(inArray(products.sku, codesInEmail));
 
   const credit = creditCheck({ customer, releasedTodayCents, orderValueCents: totalCents });
   const sender = normaliseAddress(context.senderEmail);
@@ -111,6 +145,10 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     credit,
     shipToIsTheCustomers: shipTo !== undefined,
     flagCodes: flags.map((flag) => flag.code),
+    runId: context.runId,
+    codesInEmail,
+    catalogCodes,
+    searches,
   });
   const verdict: GateVerdict = checks.every((result) => result.passes) ? "released" : "review";
 
@@ -139,6 +177,8 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       priceSource: line.price?.source ?? null,
       statedPriceCents: line.statedUnitPriceCents,
       customerWords: line.customerWords,
+      productSearchId: line.productSearchId,
+      replacesSku: line.replacesSku,
     })),
   );
 
@@ -177,7 +217,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
 }
 
 async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: string): Promise<PricedLine[]> {
-  const skus = [...new Set(order.lines.map((line) => line.sku))];
+  const skus = [...new Set(order.lines.flatMap((line) => (line.replacesSku ? [line.sku, line.replacesSku] : [line.sku])))];
   const productRows = await tx.select().from(products).where(inArray(products.sku, skus));
   const contracts = await tx
     .select()
@@ -190,10 +230,16 @@ async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: stri
 
   return order.lines.map((line) => {
     const product = productRows.find((row) => row.sku === line.sku);
-    if (!product) return { ...line, price: null, sellable: false, available: null };
+    const replacedProduct = productRows.find((row) => row.sku === line.replacesSku);
+    const replaced = replacedProduct
+      ? { product: replacedProduct, price: priceFor({ customerId: order.customerId, orderDate, product: replacedProduct, contracts }) }
+      : null;
+    if (!product) return { ...line, product: null, price: null, sellable: false, available: null, replaced };
     const price = priceFor({ customerId: order.customerId, orderDate, product, contracts });
     return {
       ...line,
+      product,
+      replaced,
       price,
       sellable: sellability({ product }).sellable,
       available: stockRows.find((row) => row.sku === line.sku)?.available ?? 0,
@@ -211,12 +257,23 @@ export async function releasedTodayFor(tx: Database, customerId: string): Promis
   return row?.total ?? 0;
 }
 
+async function citedSearches(tx: Database, lines: PricedLine[]): Promise<Map<number, CitedSearch>> {
+  const ids = [...new Set(lines.flatMap((line) => (line.productSearchId === null ? [] : [line.productSearchId])))];
+  if (ids.length === 0) return new Map();
+  const rows = await tx.select().from(productSearches).where(inArray(productSearches.id, ids));
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
 interface GateFacts {
   knownContact: boolean;
   lines: PricedLine[];
   credit: ReturnType<typeof creditCheck>;
   shipToIsTheCustomers: boolean;
   flagCodes: string[];
+  runId: string;
+  codesInEmail: string[];
+  catalogCodes: { sku: string; status: Product["status"] }[];
+  searches: Map<number, CitedSearch>;
 }
 
 function evaluate(facts: GateFacts): RecordedCheck[] {
@@ -226,6 +283,9 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
     (line) => line.statedUnitPriceCents !== null && line.statedUnitPriceCents !== line.price?.unitPriceCents,
   );
   const short = shortLines(lines);
+  const substitutions = substitutionProblems(facts);
+  const unconfident = unconfidentLines(facts);
+  const oddUnits = unitProblems(lines);
 
   const results: Record<ReleaseCheck, Omit<RecordedCheck, "check">> = {
     "known-contact": facts.knownContact
@@ -235,6 +295,18 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
       notSellable.length === 0
         ? { passes: true, detail: "Every SKU is in the catalog and active." }
         : { passes: false, detail: `Not in the catalog or discontinued: ${notSellable.join(", ")}.` },
+    "no-substitution":
+      substitutions.length === 0
+        ? { passes: true, detail: "No discontinued product was asked for." }
+        : { passes: false, detail: `P3-discontinued: ${substitutions.join(" ")}` },
+    "confident-skus":
+      unconfident.length === 0
+        ? { passes: true, detail: "Every line is a SKU the email names, or the one product its description fits." }
+        : { passes: false, detail: `LOW-CONF-sku: ${unconfident.join(" ")}` },
+    "selling-units":
+      oddUnits.length === 0
+        ? { passes: true, detail: "Every quantity is in whole selling units." }
+        : { passes: false, detail: `UNIT-ambiguous: ${oddUnits.join(" ")}` },
     "system-price":
       priceMismatches.length === 0
         ? { passes: true, detail: "Every line is at the system's price." }
@@ -269,6 +341,83 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
         : { passes: false, detail: `The agent raised: ${facts.flagCodes.join(", ")}.` },
   };
   return releaseChecks.map((check) => ({ check, ...results[check] }));
+}
+
+// Policy 3: a DISCONTINUED product is never swapped on the agent's own authority. A line that
+// replaces one waits for a person, and so does any email naming one, in case the model swapped it
+// without saying so.
+function substitutionProblems({ lines, codesInEmail, catalogCodes }: GateFacts): string[] {
+  const problems = lines.flatMap((line) => {
+    if (line.replacesSku === null) return [];
+    const replaced = line.replaced;
+    if (!replaced || replaced.product.status !== "DISCONTINUED" || replaced.product.replacedBy !== line.sku) {
+      return [`${line.sku} is not the replacement for ${line.replacesSku}.`];
+    }
+    const now = line.product && line.price ? `${line.product.pack} at ${formatUsd(line.price.unitPriceCents)}` : "no price";
+    return [
+      `${line.replacesSku} (${replaced.product.pack} at ${formatUsd(replaced.price.unitPriceCents)}) is discontinued; ${line.sku} (${now}) is swapped in for a person to accept.`,
+    ];
+  });
+  const replacedOnALine = new Set(lines.map((line) => line.replacesSku));
+  const discontinuedNamed = catalogCodes
+    .filter((product) => product.status === "DISCONTINUED" && !replacedOnALine.has(product.sku))
+    .map((product) => product.sku);
+  const unsaid = codesInEmail.filter((code) => discontinuedNamed.includes(code));
+  if (unsaid.length > 0) problems.push(`The email names discontinued ${unsaid.join(", ")}.`);
+  return problems;
+}
+
+// U18: a line is confident when the email names its SKU, or when it cites a search this run made
+// that left it as the only ACTIVE candidate and fitted no discontinued product. A SKU code in the
+// email that is not in the catalog means some line is a guess.
+function unconfidentLines({ lines, runId, codesInEmail, catalogCodes, searches }: GateFacts): string[] {
+  const unknownCodes = codesInEmail.filter((code) => !catalogCodes.some((product) => product.sku === code));
+  const problems = unknownCodes.map((code) => `The email names ${code}, which is not in the catalog.`);
+  for (const line of lines) {
+    const asked = line.replacesSku ?? line.sku;
+    if (line.productSearchId === null) {
+      if (!codesInEmail.includes(asked)) problems.push(`${asked} is not written in the email and cites no search.`);
+      continue;
+    }
+    const search = searches.get(line.productSearchId);
+    if (!search || search.runId !== runId) {
+      problems.push(`${line.sku} cites search ${line.productSearchId}, which this run did not make.`);
+    } else if (line.replacesSku !== null) {
+      if (!sameSkus(search.discontinuedSkus, [line.replacesSku])) {
+        problems.push(`The search does not single out ${line.replacesSku}.`);
+      }
+    } else if (!sameSkus(search.candidateSkus, [line.sku]) || search.discontinuedSkus.length > 0) {
+      problems.push(`${line.sku} is not the only product its description fits (${describeSearch(search)}).`);
+    }
+  }
+  return problems;
+}
+
+function sameSkus(found: string[], expected: string[]): boolean {
+  return found.length === expected.length && found.every((sku, index) => sku === expected[index]);
+}
+
+function describeSearch(search: CitedSearch): string {
+  const candidates = search.candidateSkus.length > 0 ? search.candidateSkus.join(", ") : "no candidates";
+  if (search.discontinuedSkus.length === 0) return candidates;
+  return `${candidates}; also fits discontinued ${search.discontinuedSkus.join(", ")}`;
+}
+
+// U1: a quantity the customer wrote in another unit, or not in whole selling units, is the
+// model's reading, so the customer is asked to confirm it.
+function unitProblems(lines: PricedLine[]): string[] {
+  return lines.flatMap((line) => {
+    const problems: string[] = [];
+    if (line.product && line.unitAsWritten !== null && !sellingUnitFits(line.product, line.unitAsWritten)) {
+      problems.push(
+        `${line.sku} is sold per ${line.product.sellUom === "CS" ? "case" : "each"} (${line.product.pack}), and the customer wrote "${line.unitAsWritten}"; read as ${line.quantity}.`,
+      );
+    }
+    if (line.quantityAsWritten !== null && line.quantityAsWritten !== line.quantity) {
+      problems.push(`${line.sku}: the customer wrote ${line.quantityAsWritten}, read as ${line.quantity}.`);
+    }
+    return problems;
+  });
 }
 
 // A SKU on several lines needs all of them covered.
