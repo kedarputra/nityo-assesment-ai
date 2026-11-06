@@ -1,4 +1,5 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/database";
 import {
   agentFlags,
@@ -21,6 +22,9 @@ export interface ProposalLineView {
   lineNo: number;
   sku: string;
   productName: string | null;
+  pack: string | null;
+  // The DISCONTINUED product this line replaces, when it is a substitution (policy 3).
+  swappedFor: { sku: string; name: string; pack: string; listPriceCents: number } | null;
   quantity: number;
   unitPriceCents: number | null;
   priceSource: "contract" | "list" | null;
@@ -46,6 +50,8 @@ export interface EmailWork {
   flags: { code: string; note: string }[];
   draftReply: string | null;
 }
+
+const replacedProducts = alias(products, "replaced_products");
 
 export async function findEmailWork(db: Database, emailId: string): Promise<EmailWork | null> {
   const [run] = await db
@@ -82,12 +88,18 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
             lineNo: proposalLines.lineNo,
             sku: proposalLines.sku,
             productName: products.name,
+            pack: products.pack,
+            replacesSku: proposalLines.replacesSku,
+            replacedName: replacedProducts.name,
+            replacedPack: replacedProducts.pack,
+            replacedListPriceCents: replacedProducts.listPriceCents,
             quantity: proposalLines.quantity,
             unitPriceCents: proposalLines.unitPriceCents,
             priceSource: proposalLines.priceSource,
           })
           .from(proposalLines)
           .leftJoin(products, eq(products.sku, proposalLines.sku))
+          .leftJoin(replacedProducts, eq(replacedProducts.sku, proposalLines.replacesSku))
           .where(
             inArray(
               proposalLines.proposalId,
@@ -118,6 +130,8 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
           lineNo: line.lineNo,
           sku: line.sku,
           productName: line.productName,
+          pack: line.pack,
+          swappedFor: swappedFor(line),
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
           priceSource: line.priceSource,
@@ -127,4 +141,16 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
     flags,
     draftReply: reply?.body ?? null,
   };
+}
+
+function swappedFor(line: {
+  replacesSku: string | null;
+  replacedName: string | null;
+  replacedPack: string | null;
+  replacedListPriceCents: number | null;
+}): ProposalLineView["swappedFor"] {
+  if (line.replacesSku === null || line.replacedName === null || line.replacedPack === null || line.replacedListPriceCents === null) {
+    return null;
+  }
+  return { sku: line.replacesSku, name: line.replacedName, pack: line.replacedPack, listPriceCents: line.replacedListPriceCents };
 }
