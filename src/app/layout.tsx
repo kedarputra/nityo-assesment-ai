@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { DM_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import { MAIN_CONTENT_ID, SiteHeader, SkipLink } from "@/components/site-header";
+import { getCurrentUser } from "@/server/auth/current-user";
 import "./globals.css";
 
 const sans = Plus_Jakarta_Sans({
@@ -33,12 +34,14 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const user = await getCurrentUser();
+
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <SkipLink />
-        <SiteHeader />
+        <SiteHeader user={user} />
         <main id={MAIN_CONTENT_ID} className="page">
           {children}
         </main>

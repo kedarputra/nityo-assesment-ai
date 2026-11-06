@@ -73,7 +73,7 @@ describe("seedUsers", () => {
   });
 
   it("refuses to seed when a password is missing or short, and writes nothing", async () => {
-    const { SEED_ADMIN_PASSWORD: _omitted, ...withoutAdmin } = env;
+    const withoutAdmin = { ...env, SEED_ADMIN_PASSWORD: undefined };
 
     await expect(seedUsers(db, withoutAdmin)).rejects.toThrow(/SEED_ADMIN_PASSWORD/);
     await expect(seedUsers(db, { ...env, SEED_REVIEWER_PASSWORD: "short" })).rejects.toThrow(
