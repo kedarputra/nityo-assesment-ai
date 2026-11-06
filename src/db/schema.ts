@@ -29,10 +29,13 @@ export const appSettings = pgTable("app_settings", {
 export const customerStatus = pgEnum("customer_status", ["ACTIVE", "CREDIT_HOLD"]);
 export const sellUom = pgEnum("sell_uom", ["CS", "EA"]);
 export const productStatus = pgEnum("product_status", ["ACTIVE", "DISCONTINUED"]);
+// `CANCELLED` is not in the pack: it is what an approved cancellation leaves, so the order and
+// its lines stay on record instead of being deleted.
 export const salesOrderStatus = pgEnum("sales_order_status", [
   "OPEN",
   "PARTIALLY_SHIPPED",
   "SHIPPED",
+  "CANCELLED",
 ]);
 
 export const customers = pgTable("customers", {
@@ -271,6 +274,11 @@ export const agentRuns = pgTable(
 export const proposalStatuses = ["open", "released", "rejected", "held"] as const;
 export type ProposalStatus = (typeof proposalStatuses)[number];
 
+// What a Proposal does in the ERP: a new sales order, or a change or cancellation of an existing
+// one (charting, "Requests that are not new orders"). They are Request kinds too.
+export const proposalKinds = ["new order", "order change", "cancellation"] as const satisfies readonly RequestKind[];
+export type ProposalKind = (typeof proposalKinds)[number];
+
 // One release check's result, as the gate recorded it.
 export interface RecordedCheck {
   check: string;
@@ -285,6 +293,11 @@ export interface RecordedCheck {
 // A new order the agent proposed. The gate either released it (`so_number` set) or left it open
 // in the review queue with its failing checks. Ship-to and SKUs are the model's words until the
 // gate checks them, so they carry no foreign key.
+//
+// A change or a cancellation names the sales order it applies to in `target_so_number` and always
+// waits for a person; `released` then means a person approved it and it was applied. Its lines
+// are the changes, signed: +5 on an existing line, a new line, or −20 when a line is cancelled.
+// Its total is the change in the order's value.
 export const proposals = pgTable(
   "proposals",
   {
@@ -306,6 +319,11 @@ export const proposals = pgTable(
     // The other date ambiguous words could mean, e.g. "next Tuesday": 3 or 10 Nov.
     requestedDateAlternative: date("requested_date_alternative"),
     totalCents: integer("total_cents").notNull(),
+    kind: text("kind", { enum: proposalKinds }).notNull().default("new order"),
+    targetSoNumber: text("target_so_number").references(() => salesOrders.soNumber),
+    // U2: a follow-up to a Proposal still waiting for a person is a Proposal of its own, linked to
+    // that one; Proposals are never amended in place.
+    followsProposalId: integer("follows_proposal_id").references((): AnyPgColumn => proposals.id),
     status: text("status", { enum: proposalStatuses }).notNull(),
     checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
     soNumber: text("so_number").references(() => salesOrders.soNumber),
@@ -319,6 +337,8 @@ export const proposals = pgTable(
   (table) => [
     index("proposals_email_id_idx").on(table.emailId),
     check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held')`),
+    check("proposals_kind_check", sql`${table.kind} in ('new order', 'order change', 'cancellation')`),
+    check("proposals_target_check", sql`(${table.kind} = 'new order') = (${table.targetSoNumber} is null)`),
   ],
 );
 
@@ -343,6 +363,8 @@ export const proposalLines = pgTable(
     productSearchId: integer("product_search_id").references(() => productSearches.id),
     // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
     replacesSku: text("replaces_sku"),
+    // On a change or a cancellation: the target order's line this changes; null for a line added.
+    orderLineNo: integer("order_line_no"),
   },
   (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
 );

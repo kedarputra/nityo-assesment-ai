@@ -234,7 +234,7 @@ const salesOrderSchema = z.object({
 export const editRightsInput = z.object({ order: salesOrderSchema });
 
 export type EditRights =
-  | { soNumber: string; status: "SHIPPED"; editable: false; reason: string }
+  | { soNumber: string; status: "SHIPPED" | "CANCELLED"; editable: false; reason: string }
   | { soNumber: string; status: "OPEN"; editable: true; scope: "whole-order" }
   | {
       soNumber: string;
@@ -246,7 +246,7 @@ export type EditRights =
     };
 
 // SHIPPED orders cannot be edited. OPEN orders can. PARTIALLY_SHIPPED orders can only change the
-// unshipped quantity.
+// unshipped quantity. A CANCELLED order (the app's own status) is closed like a SHIPPED one.
 export function editRights(input: z.input<typeof editRightsInput>): EditRights {
   const { order } = editRightsInput.parse(input);
   switch (order.status) {
@@ -256,6 +256,13 @@ export function editRights(input: z.input<typeof editRightsInput>): EditRights {
         status: "SHIPPED",
         editable: false,
         reason: `${order.soNumber} has shipped and cannot be edited`,
+      };
+    case "CANCELLED":
+      return {
+        soNumber: order.soNumber,
+        status: "CANCELLED",
+        editable: false,
+        reason: `${order.soNumber} has been cancelled and cannot be edited`,
       };
     case "OPEN":
       return { soNumber: order.soNumber, status: "OPEN", editable: true, scope: "whole-order" };
@@ -301,6 +308,7 @@ export function checkOrderEdit(input: z.input<typeof orderEditInput>): OrderEdit
   }
   switch (rights.status) {
     case "SHIPPED":
+    case "CANCELLED":
       return { allowed: false, reason: rights.reason };
     case "OPEN":
       return { allowed: true };

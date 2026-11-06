@@ -411,6 +411,17 @@ describe("editing a sales order", () => {
     }
   });
 
+  it("refuses any edit to an order already CANCELLED", () => {
+    const order = { ...salesOrder("SO-24055"), status: "CANCELLED" as const };
+
+    expect(editRights({ order })).toMatchObject({ status: "CANCELLED", editable: false });
+    expect(checkOrderEdit({ order, edit: { kind: "line-quantity", lineNo: 1, quantity: 5 } })).toMatchObject({ allowed: false });
+    expect(checkOrderEdit({ order, edit: { kind: "cancel" } })).toEqual({
+      allowed: false,
+      reason: "SO-24055 has been cancelled and cannot be edited",
+    });
+  });
+
   it("refuses an edit to a line the order does not have", () => {
     expect(
       checkOrderEdit({ order: salesOrder("SO-24051"), edit: { kind: "line-quantity", lineNo: 99, quantity: 1 } }),
