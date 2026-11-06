@@ -314,7 +314,7 @@ async function priceLines(tx: Database, order: OrderToCheck): Promise<PricedLine
 // A line that says it repeats an earlier order must name one of this customer's orders that has
 // the SKU; anything else is the model's mistake to correct, not a Proposal to store.
 async function confirmHistory(tx: Database, order: ProposedNewOrder): Promise<void> {
-  const cited = [...new Set(order.lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
+  const cited = citedSalesOrders(order.lines);
   if (cited.length === 0) return;
   const history = await tx
     .select({ soNumber: salesOrders.soNumber, sku: salesOrderLines.sku })
@@ -327,6 +327,10 @@ async function confirmHistory(tx: Database, order: ProposedNewOrder): Promise<vo
       throw new ToolError(`${line.fromSalesOrder} is not one of ${order.customerId}'s orders with ${line.sku}.`);
     }
   }
+}
+
+function citedSalesOrders(lines: ProposedLine[]): string[] {
+  return [...new Set(lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
 }
 
 export interface ReadDate {
@@ -431,7 +435,7 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
   const priceMismatches = lines.filter(
     (line) => line.statedUnitPriceCents !== null && line.statedUnitPriceCents !== line.price?.unitPriceCents,
   );
-  const repeated = [...new Set(lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
+  const repeated = citedSalesOrders(lines);
   const substitutions = substitutionProblems(facts);
   const unconfident = unconfidentLines(facts);
   const oddUnits = unitProblems(lines);

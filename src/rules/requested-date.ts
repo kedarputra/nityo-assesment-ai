@@ -107,7 +107,7 @@ function dayOfWeek(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
 
-export function addDays(date: string, days: number): string {
+function addDays(date: string, days: number): string {
   const moment = new Date(`${date}T00:00:00Z`);
   moment.setUTCDate(moment.getUTCDate() + days);
   return moment.toISOString().slice(0, 10);
