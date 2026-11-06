@@ -71,6 +71,28 @@ The app uses the **pooled** `DATABASE_URL`, through one `pg` pool per function i
 transaction mode is safe. Migrations, the seeds and the Reset use the **direct**
 `DATABASE_URL_UNPOOLED`.
 
+### The app's database role
+
+The audit log is append-only in the database (security 6). Migration
+[`0005_app_role.sql`](../drizzle/0005_app_role.sql) creates `harbor_point_app`, a role without a
+login that may read and write every table but may only INSERT and SELECT on `audit_events`. The
+app must connect as a login that is a member of it, not as the owner the integration injects:
+
+1. In the Neon SQL editor on each branch (`main`, then `preview`), as the owner, create the login
+   **in SQL**. A role made in the Neon console joins `neon_superuser`, which can write every
+   table, and would undo the point.
+
+   ```sql
+   CREATE ROLE harbor_point_web LOGIN PASSWORD '<a generated password>' IN ROLE harbor_point_app;
+   ```
+
+2. Set `DATABASE_URL` (pooled) for that environment to the same connection string with
+   `harbor_point_web` and its password in place of the owner's.
+
+`DATABASE_URL_UNPOOLED` stays the owner's: the migrations, the seeds and the Reset run as the
+owner, which is why the Reset can truncate the audit log and the app cannot. The in-app Reset must
+use that URL too.
+
 ## Environment variables
 
 Set each in Vercel > Settings > Environment Variables, once for **Production** and once for
@@ -79,7 +101,7 @@ a local run. None is committed.
 
 | Variable | Read by | Production | Preview |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | the app | Neon `main`, pooled (injected by the integration) | Neon `preview`, pooled |
+| `DATABASE_URL` | the app | Neon `main`, pooled, as `harbor_point_web` (above) | Neon `preview`, pooled, as `harbor_point_web` |
 | `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset` | Neon `main`, direct (injected) | Neon `preview`, direct |
 | `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production` | key from `harbor-point-preview` |
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
