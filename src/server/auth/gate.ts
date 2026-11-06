@@ -37,7 +37,8 @@ export async function gateRequest(
     response = NextResponse.json({ error: "Please sign in first." }, { status: 401 });
   } else {
     const signIn = new URL(SIGN_IN_PATH, request.nextUrl);
-    if (pathname !== "/") signIn.searchParams.set("next", `${pathname}${search}`);
+    // The inbox with an email in its URL is a deep link too: keep it, so sign-in returns there.
+    if (pathname !== "/" || search) signIn.searchParams.set("next", `${pathname}${search}`);
     response = NextResponse.redirect(signIn);
   }
   if (token) response.cookies.delete(SESSION_COOKIE);
@@ -58,8 +59,18 @@ export function isSameOrigin(request: NextRequest): boolean {
   }
 }
 
-// Where to go after signing in: only a path on this site, never another origin.
+const RETURN_BASE = "http://desk.invalid";
+
+// Where to go after signing in: only a path on this site, never another origin. Browsers strip
+// tabs and newlines and read "\\" as "/", so "/\t/evil.example" would become "//evil.example":
+// those characters are refused outright, and the URL parser has the last word on the origin.
 export function safeReturnPath(next: string | null | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
-  return next;
+  if (!next || !next.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(next)) return "/";
+  try {
+    const url = new URL(next, RETURN_BASE);
+    if (url.origin !== RETURN_BASE) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
 }
