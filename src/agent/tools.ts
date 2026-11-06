@@ -8,12 +8,12 @@ import {
   customers,
   incomingSupply,
   inventory,
+  noActionReasons,
   products,
   proposals,
+  routeReasons,
   salesOrderLines,
   salesOrders,
-  noActionReasons,
-  routeReasons,
   shipToAddresses,
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";

@@ -37,7 +37,9 @@ const ROUTED_KINDS: Record<RouteReason, RequestKind> = {
 };
 
 // A run writes one Draft reply, which answers everything its email asks.
+// A closed email gets none (U13).
 export async function writeDraftReply(tx: Database, context: RequestContext, body: string): Promise<number> {
+  await refuseIfClosed(tx, context.runId);
   if (await hasDraftReply(tx, context.runId)) {
     throw new ToolError("This email already has its Draft reply; there is one per email, covering everything it asks.");
   }
@@ -86,8 +88,9 @@ export async function routeToPerson(tx: Database, context: RequestContext, reque
     .insert(routedRequests)
     .values({ runId: context.runId, emailId: context.emailId, kind, reason: request.reason, summary: request.summary })
     .returning({ id: routedRequests.id });
+  if (!routed) throw new Error("The routed Request was not stored.");
   const draftReplyId = request.reply === null ? null : await writeDraftReply(tx, context, request.reply);
-  return { routedRequestId: routed?.id, kind, draftReplyId };
+  return { routedRequestId: routed.id, kind, draftReplyId };
 }
 
 export interface NoActionClosure {
@@ -106,6 +109,9 @@ export async function closeNoAction(tx: Database, context: RequestContext, closu
     .limit(1);
   if (proposed || routed) {
     throw new ToolError("This email already has a Proposal or a routed Request, so it is not one that needs no action.");
+  }
+  if (await hasDraftReply(tx, context.runId)) {
+    throw new ToolError("This email already has a Draft reply; an email that needs no action gets none.");
   }
 
   if (closure.reason === "duplicate") {

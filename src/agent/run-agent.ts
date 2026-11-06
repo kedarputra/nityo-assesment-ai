@@ -206,7 +206,8 @@ async function finishRun(db: Database, { context, usage, errorClass, modelId }: 
       .select({ noActionReason: agentRuns.noActionReason })
       .from(agentRuns)
       .where(eq(agentRuns.runId, context.runId));
-    const closedNoAction = run?.noActionReason != null;
+    const noActionReason = run?.noActionReason ?? null;
+    const closedNoAction = noActionReason !== null;
     const gateVerdict = gateVerdictOf(proposed.map((proposal) => proposal.status));
     const settled = outcomeOf({ gateVerdict, routed: routed.length > 0, closedNoAction });
     // A run that ends without an outcome is a failure a person sees, never a quiet "done".
@@ -238,7 +239,7 @@ async function finishRun(db: Database, { context, usage, errorClass, modelId }: 
         gateVerdict,
         errorClass: finalErrorClass,
         requestKinds: kinds,
-        noActionReason: run?.noActionReason ?? null,
+        noActionReason,
         ...usage,
         estimatedCostMicroUsd,
       },

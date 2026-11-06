@@ -381,6 +381,23 @@ describe("Requests that are routed or need no action", () => {
       expect(await repliesOf(result.summary.runId)).toEqual(["Hi Maria"]);
     });
 
+    it("gives an email closed as needing no action no Draft reply (U13)", async () => {
+      const { result } = await refusalOf(
+        "E029",
+        callsTool("draft_reply", { body: "Thanks for reaching out." }, "call_spam_reply"),
+        [callsTool("close_no_action", { reason: "spam", note: "Spam." })],
+      );
+      expect(result.summary).toMatchObject({ outcome: "no_action" });
+      expect(await repliesOf(result.summary.runId)).toEqual([]);
+    });
+
+    it("refuses to close an email that already has a Draft reply", async () => {
+      const { result } = await refusalOf("E029", callsTool("close_no_action", { reason: "spam", note: "Spam." }, "call_close"), [
+        callsTool("draft_reply", { body: "Thanks for reaching out." }),
+      ]);
+      expect(result.record.noActionReason).toBeNull();
+    });
+
     it("refuses a duplicate_of on anything but a duplicate", async () => {
       const { result } = await refusalOf(
         "E029",
