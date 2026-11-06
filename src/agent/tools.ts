@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
 import {
@@ -11,6 +11,7 @@ import {
   noActionReasons,
   productSearches,
   products,
+  proposalLines,
   proposals,
   routeReasons,
   salesOrderLines,
@@ -20,6 +21,7 @@ import {
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
 import { usualOrder } from "@/rules/order-history";
+import { proposeCancellation, proposeOrderChange, type ChangeResult } from "./change-gate";
 import { searchCatalog } from "./product-search";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
 import { closeNoAction, routeToPerson, writeDraftReply } from "./requests";
@@ -28,7 +30,7 @@ import { ToolError } from "./tool-error";
 // The agent's tools (security 5): the only way the model touches anything. Read tools read the
 // ERP; action tools write only Proposals, routed Requests, outcomes, notes, flags and Draft
 // replies. A release happens only inside the gate that `propose_new_order` hands the order to,
-// never on the model's say-so.
+// never on the model's say-so; a change or a cancellation is only ever a Proposal.
 
 export interface ToolContext {
   runId: string;
@@ -262,6 +264,162 @@ const getUsualOrder = tool({
   },
 });
 
+const getPendingProposals = tool({
+  name: "get_pending_proposals",
+  description:
+    "A customer's Proposals still waiting for a person (open or on hold), newest first, with the email each came from and its lines: new orders not yet in the ERP, and changes or cancellations not yet applied. Use it when an email follows up an earlier one.",
+  input: z.strictObject({ customer_id: customerId }),
+  async run(tx, _context, input) {
+    const pending = await tx
+      .select({
+        proposalId: proposals.id,
+        emailId: proposals.emailId,
+        kind: proposals.kind,
+        targetSoNumber: proposals.targetSoNumber,
+        status: proposals.status,
+        shipToId: proposals.shipToId,
+        totalCents: proposals.totalCents,
+      })
+      .from(proposals)
+      .where(and(eq(proposals.customerId, input.customer_id), inArray(proposals.status, ["open", "held"])))
+      .orderBy(desc(proposals.id))
+      .limit(10);
+    const lines =
+      pending.length === 0
+        ? []
+        : await tx
+            .select({ proposalId: proposalLines.proposalId, sku: proposalLines.sku, quantity: proposalLines.quantity })
+            .from(proposalLines)
+            .where(
+              inArray(
+                proposalLines.proposalId,
+                pending.map((proposal) => proposal.proposalId),
+              ),
+            )
+            .orderBy(asc(proposalLines.lineNo));
+    return {
+      proposals: pending.map((proposal) => ({
+        ...proposal,
+        lines: lines.filter((line) => line.proposalId === proposal.proposalId).map(({ sku, quantity }) => ({ sku, quantity })),
+      })),
+    };
+  },
+});
+
+const unitAsWritten = z
+  .string()
+  .min(1)
+  .max(40)
+  .optional()
+  .describe("The unit the customer wrote, as written (\"cases\", \"boxes\", \"rollos\"), if they wrote one.");
+const quantityAsWritten = z
+  .number()
+  .positive()
+  .max(100_000)
+  .optional()
+  .describe("The amount the customer wrote, when it differs from the whole selling units in quantity.");
+const customerWords = z.string().max(200).optional().describe("How the customer wrote this line.");
+const searchId = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .describe("The search_products result this SKU was chosen from, when the customer described the product in words.");
+const soNumber = z.string().min(1).max(20).describe("The sales order, e.g. SO-24051.");
+
+// What the model is told about a change or a cancellation it proposed.
+function changeOutcome(result: ChangeResult) {
+  return {
+    proposalId: result.proposalId,
+    outcome: `a ${result.kind} of ${result.soNumber}, waiting for a person to review`,
+    soNumber: result.soNumber,
+    changeInValueCents: result.totalCents,
+    lines: result.lines,
+    failingChecks: result.checks.filter((check) => !check.passes),
+  };
+}
+
+const proposeOrderChangeTool = tool({
+  name: "propose_order_change",
+  description:
+    "Propose a change to one of the customer's existing sales orders: a line's new total quantity, or lines added (policy 9: \"also add\" to an order that is already in the ERP). It never changes the order itself: a person approves it. The system checks the edit rules (SHIPPED cannot change; PARTIALLY_SHIPPED only in its unshipped quantity), prices added lines itself, and checks stock and credit for any increase. Raise any flags before you call this.",
+  input: z.strictObject({
+    customer_id: customerId,
+    so_number: soNumber,
+    line_changes: z
+      .array(
+        z.strictObject({
+          line_no: z.number().int().positive().describe("The order's line number, from get_orders."),
+          new_quantity: z.number().int().nonnegative().max(100_000).describe("The line's new total, in whole selling units."),
+          customer_words: customerWords,
+          unit_as_written: unitAsWritten,
+          quantity_as_written: quantityAsWritten,
+        }),
+      )
+      .max(50)
+      .optional(),
+    add_lines: z
+      .array(
+        z.strictObject({
+          sku,
+          quantity,
+          customer_words: customerWords,
+          search_id: searchId,
+          unit_as_written: unitAsWritten,
+          quantity_as_written: quantityAsWritten,
+        }),
+      )
+      .max(50)
+      .optional(),
+  }),
+  async run(tx, context, input) {
+    const result = await proposeOrderChange(tx, gateContext(context), {
+      customerId: input.customer_id,
+      soNumber: input.so_number,
+      lineChanges: (input.line_changes ?? []).map((line) => ({
+        lineNo: line.line_no,
+        quantity: line.new_quantity,
+        customerWords: line.customer_words ?? null,
+        unitAsWritten: line.unit_as_written ?? null,
+        quantityAsWritten: line.quantity_as_written ?? null,
+      })),
+      addedLines: (input.add_lines ?? []).map((line) => ({
+        sku: line.sku,
+        quantity: line.quantity,
+        customerWords: line.customer_words ?? null,
+        productSearchId: line.search_id ?? null,
+        unitAsWritten: line.unit_as_written ?? null,
+        quantityAsWritten: line.quantity_as_written ?? null,
+      })),
+    });
+    return changeOutcome(result);
+  },
+});
+
+const proposeCancellationTool = tool({
+  name: "propose_cancellation",
+  description:
+    "Propose cancelling one of the customer's existing sales orders. It never cancels the order itself: a person approves it, and only then is its stock returned. The system checks the edit rules: a SHIPPED or PARTIALLY_SHIPPED order cannot be cancelled.",
+  input: z.strictObject({ customer_id: customerId, so_number: soNumber }),
+  async run(tx, context, input) {
+    const result = await proposeCancellation(tx, gateContext(context), {
+      customerId: input.customer_id,
+      soNumber: input.so_number,
+    });
+    return changeOutcome(result);
+  },
+});
+
+function gateContext(context: ToolContext) {
+  return {
+    runId: context.runId,
+    emailId: context.emailId,
+    senderEmail: context.senderEmail,
+    orderDate: context.orderDate,
+    at: context.now(),
+  };
+}
+
 const proposeNewOrderTool = tool({
   name: "propose_new_order",
   description:
@@ -279,6 +437,14 @@ const proposeNewOrderTool = tool({
       .optional()
       .describe("The email's own words for the date, verbatim (\"next Tuesday\", \"by Friday October 30\"). The system reads them itself."),
     customer_po: z.string().min(1).max(60).nullable().optional(),
+    follows_proposal_id: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "When this email adds to an earlier email's order that is still a Proposal waiting for a person (get_pending_proposals): that Proposal's id. This order is proposed on its own, linked to it.",
+      ),
     lines: z
       .array(
         z.strictObject({
@@ -290,31 +456,16 @@ const proposeNewOrderTool = tool({
             .nonnegative()
             .optional()
             .describe("Only if the email names a price per selling unit, in cents."),
-          customer_words: z.string().max(200).optional().describe("How the customer wrote this line."),
+          customer_words: customerWords,
           from_sales_order: z
             .string()
             .min(1)
             .max(20)
             .optional()
             .describe("The earlier sales order this line repeats, when the email asks for the usual or the same as last time."),
-          search_id: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe("The search_products result this SKU was chosen from, when the customer described the product in words."),
-          unit_as_written: z
-            .string()
-            .min(1)
-            .max(40)
-            .optional()
-            .describe("The unit the customer wrote, as written (\"cases\", \"boxes\", \"rollos\"), if they wrote one."),
-          quantity_as_written: z
-            .number()
-            .positive()
-            .max(100_000)
-            .optional()
-            .describe("The amount the customer wrote, when it differs from the whole selling units in quantity."),
+          search_id: searchId,
+          unit_as_written: unitAsWritten,
+          quantity_as_written: quantityAsWritten,
           replaces_sku: sku
             .optional()
             .describe("The DISCONTINUED SKU the customer asked for, when this line is its replacement."),
@@ -326,19 +477,14 @@ const proposeNewOrderTool = tool({
   async run(tx, context, input) {
     const result = await proposeNewOrder(
       tx,
-      {
-        runId: context.runId,
-        emailId: context.emailId,
-        senderEmail: context.senderEmail,
-        orderDate: context.orderDate,
-        at: context.now(),
-      },
+      gateContext(context),
       {
         customerId: input.customer_id,
         shipToId: input.ship_to_id,
         requestedDate: input.requested_date,
         requestedDateWords: input.requested_date_words ?? null,
         customerPo: input.customer_po ?? null,
+        followsProposalId: input.follows_proposal_id ?? null,
         lines: input.lines.map((line) => ({
           sku: line.sku,
           quantity: line.quantity,
@@ -434,7 +580,10 @@ export const agentTools: readonly AgentTool[] = [
   checkCredit,
   getOrders,
   getUsualOrder,
+  getPendingProposals,
   proposeNewOrderTool,
+  proposeOrderChangeTool,
+  proposeCancellationTool,
   draftReply,
   raiseFlag,
   routeToPersonTool,

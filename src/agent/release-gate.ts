@@ -57,6 +57,8 @@ export interface ProposedNewOrder {
   requestedDate: string;
   requestedDateWords: string | null;
   customerPo: string | null;
+  // U2: the earlier email's Proposal, still waiting for a person, that this order adds to.
+  followsProposalId: number | null;
   lines: ProposedLine[];
 }
 
@@ -90,7 +92,7 @@ export interface PricedLine extends ProposedLine {
   replaced: { product: Product; price: Price } | null;
 }
 
-interface CitedSearch {
+export interface CitedSearch {
   runId: string;
   candidateSkus: string[];
   discontinuedSkus: string[];
@@ -118,6 +120,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     lines: order.lines,
   });
   await confirmHistory(tx, order);
+  await confirmFollowUp(tx, context, order);
   const verdict: GateVerdict = checks.every((result) => result.passes) ? "released" : "review";
 
   const [proposal] = await tx
@@ -128,6 +131,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       customerId: order.customerId,
       shipToId: order.shipToId,
       customerPo: order.customerPo,
+      followsProposalId: order.followsProposalId,
       requestedDate: requested.date,
       requestedDateWords: order.requestedDateWords,
       requestedDateAlternative: requested.alternative,
@@ -274,7 +278,10 @@ export function sellableLines(lines: PricedLine[]): ReleasedLine[] {
   return lines.flatMap((line) => (line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : []));
 }
 
-async function priceLines(tx: Database, order: OrderToCheck): Promise<PricedLine[]> {
+export async function priceLines(
+  tx: Database,
+  order: Pick<OrderToCheck, "customerId" | "orderDate" | "lines">,
+): Promise<PricedLine[]> {
   const skus = [...new Set(order.lines.flatMap((line) => (line.replacesSku ? [line.sku, line.replacesSku] : [line.sku])))];
   const productRows = await tx.select().from(products).where(inArray(products.sku, skus));
   const contracts = await tx
@@ -326,6 +333,30 @@ async function confirmHistory(tx: Database, order: ProposedNewOrder): Promise<vo
     if (!history.some((row) => row.soNumber === line.fromSalesOrder && row.sku === line.sku)) {
       throw new ToolError(`${line.fromSalesOrder} is not one of ${order.customerId}'s orders with ${line.sku}.`);
     }
+  }
+}
+
+// Policy 9 and U2: an order that follows up a pending Proposal is linked to it, never merged
+// into it. A follow-up to an order already in the ERP is a change to that order instead.
+async function confirmFollowUp(tx: Database, context: GateContext, order: ProposedNewOrder): Promise<void> {
+  if (order.followsProposalId === null) return;
+  const [earlier] = await tx.select().from(proposals).where(eq(proposals.id, order.followsProposalId));
+  if (!earlier || earlier.customerId !== order.customerId) {
+    throw new ToolError(`Proposal ${order.followsProposalId} is not one of ${order.customerId}'s Proposals.`);
+  }
+  if (earlier.emailId === context.emailId) {
+    throw new ToolError(`Proposal ${earlier.id} is this email's own; follow up another email's Proposal.`);
+  }
+  if (earlier.kind !== "new order") {
+    throw new ToolError(`Proposal ${earlier.id} is a ${earlier.kind} of ${earlier.targetSoNumber}, not a new order to add to.`);
+  }
+  if (earlier.status === "released" && earlier.soNumber !== null) {
+    throw new ToolError(
+      `Proposal ${earlier.id} is already in the ERP as ${earlier.soNumber}; propose_order_change to ${earlier.soNumber} instead (policy 9).`,
+    );
+  }
+  if (earlier.status !== "open" && earlier.status !== "held") {
+    throw new ToolError(`Proposal ${earlier.id} was ${earlier.status}; there is no pending order to follow up.`);
   }
 }
 
@@ -396,16 +427,17 @@ function readRequestedDate(
 }
 
 // What this customer's orders released earlier today add to their exposure (ticket 09 of the map:
-// credit is open_balance + same-day releases + this order).
+// credit is open_balance + same-day releases + this order). An approved change adds its increase;
+// a decrease or a cancellation is not taken off, so the exposure is never understated.
 export async function releasedTodayFor(tx: Database, customerId: string): Promise<number> {
   const [row] = await tx
-    .select({ total: sum(proposals.totalCents).mapWith(Number) })
+    .select({ total: sum(sql`greatest(${proposals.totalCents}, 0)`).mapWith(Number) })
     .from(proposals)
     .where(and(eq(proposals.customerId, customerId), eq(proposals.status, "released")));
   return row?.total ?? 0;
 }
 
-async function citedSearches(tx: Database, lines: PricedLine[]): Promise<Map<number, CitedSearch>> {
+export async function citedSearches(tx: Database, lines: PricedLine[]): Promise<Map<number, CitedSearch>> {
   const ids = [...new Set(lines.flatMap((line) => (line.productSearchId === null ? [] : [line.productSearchId])))];
   if (ids.length === 0) return new Map();
   const rows = await tx.select().from(productSearches).where(inArray(productSearches.id, ids));
@@ -560,7 +592,7 @@ function describeSearch(search: CitedSearch): string {
 
 // U1: a quantity the customer wrote in another unit, or not in whole selling units, is the
 // model's reading, so the customer is asked to confirm it.
-function unitProblems(lines: PricedLine[]): string[] {
+export function unitProblems(lines: PricedLine[]): string[] {
   return lines.flatMap((line) => {
     const problems: string[] = [];
     if (line.product && line.unitAsWritten !== null && !sellingUnitFits(line.product, line.unitAsWritten)) {
@@ -586,7 +618,7 @@ function describePriceDifference(line: PricedLine): string {
 
 // Short stock is never released (policy 2): the check shows what is available and due in, and
 // what a person can choose. A date the stock cannot meet is flagged and adds declining (U10).
-function stockResult(lines: PricedLine[], customerDate: string | null): Omit<RecordedCheck, "check"> {
+export function stockResult(lines: PricedLine[], customerDate: string | null): Omit<RecordedCheck, "check"> {
   const notInCatalog: string[] = [];
   const short: ShortStock[] = [];
   for (const [sku, wanted] of wantedBySku(lines)) {
@@ -724,6 +756,6 @@ async function nextSoNumber(tx: Database): Promise<string> {
   return `SO-${highest + 1}`;
 }
 
-function normaliseAddress(address: string): string {
+export function normaliseAddress(address: string): string {
   return address.trim().toLowerCase();
 }

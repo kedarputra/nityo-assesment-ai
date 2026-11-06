@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/database";
 import {
@@ -12,10 +12,12 @@ import {
   proposalLines,
   proposals,
   routedRequests,
+  salesOrderLines,
   shipToAddresses,
   users,
   type AgentRunOutcome,
   type NoActionReason,
+  type ProposalKind,
   type ProposalStatus,
   type RecordedCheck,
   type RequestKind,
@@ -41,6 +43,20 @@ export interface ProposalLineView {
   // How the customer wrote the line, when the agent kept it; and the stock on the shelf now.
   customerWords: string | null;
   available: number | null;
+  // On a change or a cancellation, where `quantity` is the signed change: the target order's
+  // line (null for a line added) and its quantity before and after the change.
+  orderLineNo: number | null;
+  before: number | null;
+  after: number | null;
+}
+
+// A Proposal this one is linked to (U2): the pending order it follows up, or a follow-up to it.
+export interface LinkedProposalView {
+  relation: "follows" | "followed-by";
+  proposalId: number;
+  emailId: string;
+  status: ProposalStatus;
+  totalCents: number;
 }
 
 export interface ProposalDecisionView {
@@ -60,8 +76,11 @@ export interface DraftReplyView {
 
 export interface ProposalView {
   id: number;
+  kind: ProposalKind;
   status: ProposalStatus;
   soNumber: string | null;
+  // The sales order a change or a cancellation applies to.
+  targetSoNumber: string | null;
   customerName: string;
   shipToId: string;
   shipToName: string | null;
@@ -74,6 +93,7 @@ export interface ProposalView {
   decision: ProposalDecisionView | null;
   // The customer's own ship-tos, the only ones a person may choose.
   shipToChoices: { shipToId: string; name: string }[];
+  linked: LinkedProposalView[];
 }
 
 export interface RoutedRequestView {
@@ -122,8 +142,11 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
   const proposalRows = await db
     .select({
       id: proposals.id,
+      kind: proposals.kind,
       status: proposals.status,
       soNumber: proposals.soNumber,
+      targetSoNumber: proposals.targetSoNumber,
+      followsProposalId: proposals.followsProposalId,
       customerName: customers.name,
       shipToId: proposals.shipToId,
       shipToName: shipToAddresses.name,
@@ -162,6 +185,7 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
             priceSource: proposalLines.priceSource,
             customerWords: proposalLines.customerWords,
             available: inventory.available,
+            orderLineNo: proposalLines.orderLineNo,
           })
           .from(proposalLines)
           .leftJoin(products, eq(products.sku, proposalLines.sku))
@@ -174,6 +198,9 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
             ),
           )
           .orderBy(asc(proposalLines.proposalId), asc(proposalLines.lineNo));
+
+  const targetLines = await linesOfTargets(db, proposalRows);
+  const linkedRows = await linkedProposals(db, proposalRows);
 
   const routed = await db
     .select({ kind: routedRequests.kind, reason: routedRequests.reason, summary: routedRequests.summary })
@@ -215,7 +242,7 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
       errorClass: run.errorClass,
       requestKinds: run.requestKinds,
     },
-    proposals: proposalRows.map(({ customerId, decidedBy, decidedAt, decisionReason, ...proposal }) => ({
+    proposals: proposalRows.map(({ customerId, decidedBy, decidedAt, decisionReason, followsProposalId, ...proposal }) => ({
       ...proposal,
       decision: decidedBy !== null && decidedAt !== null ? { by: decidedBy, at: decidedAt, reason: decisionReason } : null,
       shipToChoices: shipTos
@@ -235,7 +262,15 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
           lineTotalCents: line.unitPriceCents === null ? null : line.unitPriceCents * line.quantity,
           customerWords: line.customerWords,
           available: line.available,
+          orderLineNo: line.orderLineNo,
+          ...beforeAndAfter(proposal, line, targetLines),
         })),
+      linked: linkedRows.flatMap((other): LinkedProposalView[] => {
+        const view = { proposalId: other.id, emailId: other.emailId, status: other.status, totalCents: other.totalCents };
+        if (other.id === followsProposalId) return [{ relation: "follows", ...view }];
+        if (other.followsProposalId === proposal.id) return [{ relation: "followed-by", ...view }];
+        return [];
+      }),
     })),
     routed,
     noAction:
@@ -246,6 +281,53 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
     draftReply: reply ? { body: reply.body, readyBy: reply.readyBy, readyAt: reply.readyAt } : null,
     notes,
   };
+}
+
+type TargetLine = { soNumber: string; lineNo: number; qtyOrdered: number };
+
+async function linesOfTargets(db: Database, rows: { targetSoNumber: string | null }[]): Promise<TargetLine[]> {
+  const targets = [...new Set(rows.flatMap((row) => (row.targetSoNumber === null ? [] : [row.targetSoNumber])))];
+  if (targets.length === 0) return [];
+  return db
+    .select({ soNumber: salesOrderLines.soNumber, lineNo: salesOrderLines.lineNo, qtyOrdered: salesOrderLines.qtyOrdered })
+    .from(salesOrderLines)
+    .where(inArray(salesOrderLines.soNumber, targets));
+}
+
+// The Proposals these follow up, and the ones that follow them up, from any email.
+async function linkedProposals(db: Database, rows: { id: number; followsProposalId: number | null }[]) {
+  if (rows.length === 0) return [];
+  const ids = rows.map((row) => row.id);
+  const follows = rows.flatMap((row) => (row.followsProposalId === null ? [] : [row.followsProposalId]));
+  const linkedTo = follows.length === 0 ? inArray(proposals.followsProposalId, ids) : or(inArray(proposals.followsProposalId, ids), inArray(proposals.id, follows));
+  return db
+    .select({
+      id: proposals.id,
+      emailId: proposals.emailId,
+      status: proposals.status,
+      totalCents: proposals.totalCents,
+      followsProposalId: proposals.followsProposalId,
+    })
+    .from(proposals)
+    .where(linkedTo)
+    .orderBy(asc(proposals.id));
+}
+
+// A change's line before and after. Once it is applied the order shows the "after", so the
+// "before" is worked back from it.
+function beforeAndAfter(
+  proposal: { kind: ProposalKind; status: ProposalStatus; targetSoNumber: string | null },
+  line: { orderLineNo: number | null; quantity: number },
+  targetLines: TargetLine[],
+): { before: number | null; after: number | null } {
+  if (proposal.kind === "new order") return { before: null, after: null };
+  if (line.orderLineNo === null) return { before: 0, after: line.quantity };
+  const current = targetLines.find(
+    (candidate) => candidate.soNumber === proposal.targetSoNumber && candidate.lineNo === line.orderLineNo,
+  );
+  if (!current) return { before: null, after: null };
+  const before = proposal.status === "released" ? current.qtyOrdered - line.quantity : current.qtyOrdered;
+  return { before, after: before + line.quantity };
 }
 
 function swappedFor(line: {

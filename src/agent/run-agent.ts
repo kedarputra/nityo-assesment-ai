@@ -225,7 +225,10 @@ interface Finish {
 
 async function finishRun(db: Database, { context, usage, errorClass, modelId }: Finish): Promise<AgentRunSummary> {
   return db.transaction(async (tx) => {
-    const proposed = await tx.select({ status: proposals.status }).from(proposals).where(eq(proposals.runId, context.runId));
+    const proposed = await tx
+      .select({ status: proposals.status, kind: proposals.kind })
+      .from(proposals)
+      .where(eq(proposals.runId, context.runId));
     const routed = await tx
       .select({ kind: routedRequests.kind })
       .from(routedRequests)
@@ -241,9 +244,8 @@ async function finishRun(db: Database, { context, usage, errorClass, modelId }: 
     // A run that ends without an outcome is a failure a person sees, never a quiet "done".
     const finalErrorClass = errorClass ?? (settled === null ? "no-outcome" : null);
     const outcome: AgentRunOutcome = finalErrorClass === null && settled !== null ? settled : "failed";
-    // Every Proposal so far is a new order; order changes and cancellations add their own kinds.
     const kinds = requestKindsOf([
-      ...(proposed.length > 0 ? (["new order"] as const) : []),
+      ...proposed.map((proposal) => proposal.kind),
       ...routed.map((request) => request.kind),
       ...(closedNoAction ? (["no action"] as const) : []),
     ]);

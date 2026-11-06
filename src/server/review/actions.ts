@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDatabase } from "@/db/client";
+import type { ProposalKind } from "@/db/schema";
 import { requireRole } from "@/server/auth/current-user";
 import { listInboxEmails, needsYou, nextNeedingYou } from "@/server/inbox/inbox";
 import {
@@ -76,6 +77,12 @@ async function afterDecision(
   return { left, moveOn };
 }
 
+const APPROVED_WORDS: Record<ProposalKind, string> = {
+  "new order": "Released",
+  "order change": "Changed",
+  cancellation: "Cancelled",
+};
+
 function toGo(left: number): string {
   return left === 0 ? "That’s everything 🎉" : `${left} to go.`;
 }
@@ -101,8 +108,9 @@ export async function approveProposalAction(input: unknown): Promise<ReviewActio
     const { left, moveOn } = await afterDecision(result.emailId);
     return {
       ok: true,
-      toast: `Released ${result.soNumber} for ${result.customerName}. ${toGo(left)}`,
-      undoProposalId: id,
+      toast: `${APPROVED_WORDS[result.kind]} ${result.soNumber} for ${result.customerName}. ${toGo(left)}`,
+      // Undo takes back a release; a change or a cancellation applied to an order is final.
+      undoProposalId: result.kind === "new order" ? id : null,
       moveOn,
     };
   });

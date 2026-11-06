@@ -1,11 +1,12 @@
-import { isHardRule, type ReleaseCheck } from "@/agent/release-checks";
+import { isHardRule, type ProposalCheck } from "@/agent/release-checks";
 import type { RecordedCheck } from "@/db/schema";
 
 // The release checks as a person reads them, shared by the Proposal pane and the review controls.
 
 // What each release check is called on the desk (DESIGN.md, "Voice and words").
-const CHECK_NAMES: Record<ReleaseCheck, string> = {
+const CHECK_NAMES: Record<ProposalCheck, string> = {
   "known-contact": "A known contact sent it",
+  "edit-rights": "The order can still change",
   "skus-sellable": "Every product can be sold",
   "no-substitution": "No product swap",
   "confident-skus": "Every product is clear",
@@ -21,7 +22,7 @@ const CHECK_NAMES: Record<ReleaseCheck, string> = {
 };
 
 export function checkName(check: string): string {
-  return check in CHECK_NAMES ? CHECK_NAMES[check as ReleaseCheck] : check;
+  return check in CHECK_NAMES ? CHECK_NAMES[check as ProposalCheck] : check;
 }
 
 // Why a hard rule cannot be overridden, and what clears it (DESIGN.md: "Can't be overridden.").
@@ -31,6 +32,8 @@ export function lockedBecause(check: string): string {
       return "Can’t be overridden. Swap in a product that can be sold, or reject it.";
     case "ship-to":
       return "Can’t be overridden. Choose one of the customer’s own ship-tos.";
+    case "edit-rights":
+      return "Can’t be overridden. Reject it, and the reply tells the customer what we can do instead.";
     default:
       return "Can’t be overridden. Accounts needs to clear this first.";
   }

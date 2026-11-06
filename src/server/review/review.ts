@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "@/agent/audit";
+import { applyChange, changesToRecheck, checkChange, storeRecheckedChange, targetOrder, type ChangeKind } from "@/agent/change-gate";
 import { isHardRule } from "@/agent/release-checks";
 import { checkOrder, lockReleases, releaseOrder, sellableLines, withdrawOrder } from "@/agent/release-gate";
 import type { Database } from "@/db/database";
@@ -13,13 +14,15 @@ import {
   proposalLines,
   proposals,
   shipToAddresses,
+  type ProposalKind,
   type RecordedCheck,
 } from "@/db/schema";
 import { businessDateOf } from "@/lib/business-clock";
 
 // A person's decisions on a Proposal (charting, approve, edit and override): every approve or
 // edit re-runs the release checks; a soft check is overridden only with a note; a hard rule can
-// only be rejected or held. Each decision and its audit events commit in one transaction.
+// only be rejected or held. Each decision and its audit events commit in one transaction. A change
+// or a cancellation of an existing order is decided the same way, and approving it applies it.
 
 // The decision cannot be made: the Proposal is already decided, the edit is not allowed, or the
 // Undo window has passed. Nothing was changed.
@@ -106,6 +109,34 @@ async function recheck(tx: Database, { proposal, senderEmail, orderDate }: Propo
     .update(proposals)
     .set({ checks: checked.checks, totalCents: checked.totalCents })
     .where(eq(proposals.id, proposal.id));
+  const failing = await recordRecheck(tx, proposal, checked, at);
+  return { ...checked, failing };
+}
+
+// A change or a cancellation re-checked against its sales order as it stands now.
+async function recheckChange(tx: Database, { proposal, senderEmail, orderDate }: ProposalUnderReview, kind: ChangeKind, at: Date) {
+  if (proposal.targetSoNumber === null) throw new Error(`Proposal ${proposal.id} is a ${kind} with no sales order.`);
+  const target = await targetOrder(tx, proposal.targetSoNumber);
+  const checked = await checkChange(tx, {
+    runId: proposal.runId,
+    emailId: proposal.emailId,
+    senderEmail,
+    orderDate,
+    kind,
+    target,
+    changes: await changesToRecheck(tx, { id: proposal.id, kind }, target),
+  });
+  await storeRecheckedChange(tx, proposal.id, checked);
+  const failing = await recordRecheck(tx, proposal, checked, at);
+  return { ...checked, target, failing };
+}
+
+async function recordRecheck(
+  tx: Database,
+  proposal: ProposalRow,
+  checked: { totalCents: number; checks: RecordedCheck[] },
+  at: Date,
+): Promise<RecordedCheck[]> {
   const failing = checked.checks.filter((check) => !check.passes);
   await recordAudit(tx, {
     at,
@@ -121,15 +152,16 @@ async function recheck(tx: Database, { proposal, senderEmail, orderDate }: Propo
       failing,
     },
   });
-  return { ...checked, failing };
+  return failing;
 }
 
 export type ApproveResult =
-  | { released: true; emailId: string; soNumber: string; totalCents: number; customerName: string }
+  | { released: true; kind: ProposalKind; emailId: string; soNumber: string; totalCents: number; customerName: string }
   | { released: false; hardRules: RecordedCheck[]; missingNotes: string[] };
 
 // Approve & release: the checks re-run first. A failing hard rule refuses the approval, whatever
 // notes came with it; a failing soft check needs its note. The re-run checks are kept either way.
+// A new order is released; a change or a cancellation is applied to its sales order.
 export async function approveProposal(
   db: Database,
   decision: Decision & { notes: Readonly<Record<string, string>> },
@@ -137,7 +169,11 @@ export async function approveProposal(
   return db.transaction(async (tx) => {
     const underReview = await decidableProposal(tx, decision.proposalId);
     const { proposal } = underReview;
-    const checked = await recheck(tx, underReview, decision.at);
+    const { kind } = proposal;
+    const checked =
+      kind === "new order"
+        ? { kind, ...(await recheck(tx, underReview, decision.at)) }
+        : { kind, ...(await recheckChange(tx, underReview, kind, decision.at)) };
     const audit = { at: decision.at, emailId: proposal.emailId, runId: proposal.runId, userId: decision.userId };
 
     const hardRules = checked.failing.filter((check) => isHardRule(check.check));
@@ -168,18 +204,26 @@ export async function approveProposal(
         },
       });
     }
-    const soNumber = await releaseOrder(tx, {
-      proposalId: proposal.id,
-      customerId: proposal.customerId,
-      shipToId: proposal.shipToId,
-      customerPo: proposal.customerPo,
-      requestedDate: proposal.requestedDate,
-      orderDate: underReview.orderDate,
-      lines: sellableLines(checked.lines),
-    });
+    let soNumber: string;
+    let allocated: { sku: string; quantity: number }[];
+    if (checked.kind !== "new order") {
+      soNumber = checked.target.order.soNumber;
+      allocated = await applyChange(tx, checked.kind, checked.target, checked.lines);
+    } else {
+      soNumber = await releaseOrder(tx, {
+        proposalId: proposal.id,
+        customerId: proposal.customerId,
+        shipToId: proposal.shipToId,
+        customerPo: proposal.customerPo,
+        requestedDate: proposal.requestedDate,
+        orderDate: underReview.orderDate,
+        lines: sellableLines(checked.lines),
+      });
+      allocated = checked.lines.map((line) => ({ sku: line.sku, quantity: line.quantity }));
+    }
     await tx
       .update(proposals)
-      .set({ decidedBy: decision.userId, decidedAt: decision.at, decisionReason: null })
+      .set({ status: "released", decidedBy: decision.userId, decidedAt: decision.at, decisionReason: null })
       .where(eq(proposals.id, proposal.id));
     await recordAudit(tx, {
       ...audit,
@@ -187,10 +231,11 @@ export async function approveProposal(
       action: "proposal.approved",
       detail: {
         proposalId: proposal.id,
+        kind,
         soNumber,
         totalCents: checked.totalCents,
         overridden: overrides.map((check) => check.check),
-        allocated: checked.lines.map((line) => ({ sku: line.sku, quantity: line.quantity })),
+        allocated,
       },
     });
     const [customer] = await tx
@@ -199,6 +244,7 @@ export async function approveProposal(
       .where(eq(customers.customerId, proposal.customerId));
     return {
       released: true,
+      kind,
       emailId: proposal.emailId,
       soNumber,
       totalCents: checked.totalCents,
@@ -299,6 +345,9 @@ export async function editProposal(
   return db.transaction(async (tx) => {
     const underReview = await decidableProposal(tx, decision.proposalId);
     const { proposal } = underReview;
+    if (proposal.kind !== "new order") {
+      throw new ReviewRefused(`A ${proposal.kind} can’t be edited here. Reject it, and say in the reply what we can do.`);
+    }
     const before = await applyEdit(tx, proposal, edit);
     await recordAudit(tx, {
       at: decision.at,
