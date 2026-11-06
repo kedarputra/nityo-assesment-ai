@@ -35,6 +35,8 @@ export interface ProposalView {
   shipToId: string;
   shipToName: string | null;
   requestedDate: string;
+  requestedDateWords: string | null;
+  requestedDateAlternative: string | null;
   totalCents: number;
   checks: RecordedCheck[];
   lines: ProposalLineView[];
@@ -65,6 +67,8 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
       shipToId: proposals.shipToId,
       shipToName: shipToAddresses.name,
       requestedDate: proposals.requestedDate,
+      requestedDateWords: proposals.requestedDateWords,
+      requestedDateAlternative: proposals.requestedDateAlternative,
       totalCents: proposals.totalCents,
       checks: proposals.checks,
     })

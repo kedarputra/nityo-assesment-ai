@@ -431,8 +431,8 @@ function describeShortStock(line: ShortStock, customerDate: string | null): stri
       : line.incoming.map((delivery) => `${delivery.qty} due ${day(delivery.expectedDate)} (${delivery.supplierPo})`).join(", ");
   const text = `${line.sku} wants ${line.wanted}, ${line.available} available, ${incoming}`;
   if (!line.dateUnmeetable || customerDate === null) return text;
-  const earliest = line.fullBy ? `not before ${day(line.fullBy)}` : "not with what is due in";
-  return `${text}; all ${line.wanted} can arrive ${earliest}, after the requested ${day(customerDate)}`;
+  if (line.fullBy === null) return `${text}; what is due in never covers all ${line.wanted}, so ${day(customerDate)} cannot be met`;
+  return `${text}; the full ${line.wanted} can arrive ${day(line.fullBy)} at the earliest, after the requested ${day(customerDate)}`;
 }
 
 function describeChoice(choice: Exclude<ShortStockChoice, { kind: "decline" }>, line: ShortStock): string {

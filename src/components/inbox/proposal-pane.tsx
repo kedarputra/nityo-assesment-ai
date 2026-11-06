@@ -15,6 +15,8 @@ const CHECK_NAMES: Record<string, string> = {
   "skus-sellable": "Every product can be sold",
   "system-price": "System prices",
   "full-stock": "Fully in stock",
+  "requested-date": "A clear delivery date",
+  "from-history": "Lines the customer wrote out",
   "credit-hold": "Not on credit hold",
   "credit-limit": "Within the credit limit",
   "ship-to": "One clear ship-to",
@@ -91,6 +93,8 @@ function ProposalCard({ proposal }: { proposal: ProposalView }) {
       <p className="meta">
         {proposal.customerName} · {proposal.shipToName ?? <span className="id">{proposal.shipToId}</span>} · wanted{" "}
         {formatRequestedDate(proposal.requestedDate)}
+        {proposal.requestedDateAlternative ? ` or ${formatRequestedDate(proposal.requestedDateAlternative)}` : null}
+        {proposal.requestedDateWords ? ` (“${proposal.requestedDateWords}”)` : null}
       </p>
       {failing.length > 0 ? (
         <section className="why-waiting" aria-label="Why it’s waiting for you">
@@ -132,6 +136,7 @@ function CheckList({ checks }: { checks: RecordedCheck[] }) {
           <span aria-hidden="true">{check.passes ? "✓" : "!"}</span>
           <span>
             <b>{CHECK_NAMES[check.check] ?? check.check}.</b> {check.detail}
+            {check.choices && check.choices.length > 0 ? ` Choices: ${check.choices.join("; ")}.` : null}
           </span>
         </li>
       ))}

@@ -199,6 +199,8 @@ const e001Released: EmailWork = {
       shipToId: "S001",
       shipToName: "Bluefin Bistro - Pier Street",
       requestedDate: "2026-11-05",
+      requestedDateWords: "Thursday",
+      requestedDateAlternative: null,
       totalCents: 67200,
       checks: allChecksPass,
       lines: [
@@ -268,6 +270,42 @@ describe("InboxDesk, the Proposal pane after a run", () => {
     expect(html).toContain("Why it’s waiting for you");
     expect(html).toContain("<b>System prices.</b> HPS-1408 stated $30.00, system $45.00.");
     expect(html).toContain("<summary>7 checks look good</summary>");
+  });
+
+  it("shows both dates ambiguous words could mean, and what a person can choose for short stock", () => {
+    const [proposal] = e001Released.proposals;
+    if (!proposal) throw new Error("no proposal");
+    const review: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [
+        {
+          ...proposal,
+          status: "open",
+          soNumber: null,
+          requestedDate: "2026-11-03",
+          requestedDateWords: "next Tuesday",
+          requestedDateAlternative: "2026-11-10",
+          checks: [
+            {
+              check: "full-stock",
+              passes: false,
+              detail: "Not enough available: HPS-1302 wants 12, 5 available, 40 due Mon 9 Nov (PO-7712).",
+              flags: ["P2-short-stock"],
+              choices: ["HPS-1302: ship 5 now and the other 7 from Mon 9 Nov", "HPS-1302: backorder all 12 for Mon 9 Nov"],
+            },
+          ],
+        },
+      ],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: waiting, work: review });
+
+    expect(html).toContain("wanted Tue 3 Nov or Tue 10 Nov (“next Tuesday”)");
+    expect(html).toContain(
+      "Choices: HPS-1302: ship 5 now and the other 7 from Mon 9 Nov; HPS-1302: backorder all 12 for Mon 9 Nov.",
+    );
   });
 
   it("says calmly when a run did not finish", () => {
