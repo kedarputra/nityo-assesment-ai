@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Database } from "@/db/database";
 import { agentFlags, agentRuns, emails, proposals, type AgentRunOutcome, type GateVerdict, type ProposalStatus } from "@/db/schema";
 import { businessDateOf } from "@/lib/business-clock";
+import { errorClassOf, logError, logToolCall } from "@/lib/log";
 import { toolCallsIn, type Model, type ModelMessage, type ModelResponse, type ToolCall, type ToolResult } from "@/model/model";
 import { BusinessRuleError } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
@@ -115,10 +116,14 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
     }
   } catch (error) {
     // The run is recorded as failed with its error class, never left looking finished.
-    errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
+    errorClass = errorClassOf(error);
   }
 
-  return finishRun(db, { context, state, usage, errorClass, modelId: options.modelId });
+  const summary = await finishRun(db, { context, state, usage, errorClass, modelId: options.modelId });
+  if (summary.errorClass !== null) {
+    logError({ event: "run_failed", runId: summary.runId, emailId: summary.emailId, errorClass: summary.errorClass });
+  }
+  return summary;
 }
 
 function countUsage(usage: Usage, response: ModelResponse): void {
@@ -138,9 +143,32 @@ function stopErrorClass(response: ModelResponse): string | null {
   }
 }
 
+// Each call is one line in the structured log, timed from the moment the model's call arrives.
+async function callTool(db: Database, context: ToolContext, state: RunState, call: ToolCall): Promise<ToolResult> {
+  const startedAt = performance.now();
+  // The model names the tool, so a made-up name could carry anything; only a real tool is logged.
+  const tool = findTool(call.name) ? call.name : "unknown";
+  const log = (errorClass: string | null) =>
+    logToolCall({ runId: context.runId, emailId: context.emailId, tool, durationMs: performance.now() - startedAt, errorClass });
+  try {
+    const result = await applyToolCall(db, context, state, call);
+    log(result.refusal);
+    return result.toolResult;
+  } catch (error) {
+    log(errorClassOf(error));
+    throw error;
+  }
+}
+
+interface AppliedCall {
+  toolResult: ToolResult;
+  // Why the call was refused, as an error class, or null when it ran.
+  refusal: string | null;
+}
+
 // Each tool call runs in its own transaction with its audit event. A call that fails its schema
 // or the tool's own checks writes nothing but the audit event, and the model gets the error.
-async function callTool(db: Database, context: ToolContext, state: RunState, call: ToolCall): Promise<ToolResult> {
+async function applyToolCall(db: Database, context: ToolContext, state: RunState, call: ToolCall): Promise<AppliedCall> {
   const audit = (tx: Database, action: string, detail: Record<string, unknown>) =>
     recordAudit(tx, {
       at: context.now(),
@@ -150,15 +178,15 @@ async function callTool(db: Database, context: ToolContext, state: RunState, cal
       runId: context.runId,
       detail: { tool: call.name, input: call.input, ...detail },
     });
-  const refuse = async (problem: string): Promise<ToolResult> => {
+  const refuse = async (refusal: string, problem: string): Promise<AppliedCall> => {
     await audit(db, "tool.refused", { problem });
-    return { type: "tool_result", toolCallId: call.id, content: problem, isError: true };
+    return { toolResult: { type: "tool_result", toolCallId: call.id, content: problem, isError: true }, refusal };
   };
 
   const tool = findTool(call.name);
-  if (!tool) return refuse(`There is no tool called ${call.name}.`);
+  if (!tool) return refuse("UnknownTool", `There is no tool called ${call.name}.`);
   const validated = tool.validate(call.input);
-  if (!validated.valid) return refuse(`The arguments do not fit ${call.name}'s schema:\n${validated.problems}`);
+  if (!validated.valid) return refuse("SchemaMismatch", `The arguments do not fit ${call.name}'s schema:\n${validated.problems}`);
 
   try {
     const content = await db.transaction(async (tx) => {
@@ -167,9 +195,9 @@ async function callTool(db: Database, context: ToolContext, state: RunState, cal
       await audit(tx, "tool.called", { result: capped });
       return capped;
     });
-    return { type: "tool_result", toolCallId: call.id, content };
+    return { toolResult: { type: "tool_result", toolCallId: call.id, content }, refusal: null };
   } catch (error) {
-    if (error instanceof ToolError || error instanceof BusinessRuleError) return refuse(error.message);
+    if (error instanceof ToolError || error instanceof BusinessRuleError) return refuse(errorClassOf(error), error.message);
     throw error;
   }
 }

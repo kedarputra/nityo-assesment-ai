@@ -57,7 +57,7 @@ describe("the app's database role (security 6)", () => {
   it("can add to and read the audit log, but an UPDATE, a DELETE and a TRUNCATE of it all fail", async () => {
     const db = testDatabase.db;
     await actAsTheApp();
-    await recordAudit(db, { at: new Date(), actor: "person", action: "test.recorded", detail: {} });
+    await recordAudit(db, { at: new Date(), actor: "person", action: "test.recorded", emailId: null, runId: null, detail: {} });
     expect(await db.$count(auditEvents)).toBe(1);
 
     expect(await refusal(db.update(auditEvents).set({ action: "test.rewritten" }))).toMatch(/permission denied/);
