@@ -48,6 +48,7 @@ export class AnthropicModel implements Model {
     return {
       message: { role: "assistant", content: reply.content.map(fromApiBlock) },
       stopReason: fromApiStopReason(reply.stop_reason),
+      usage: { inputTokens: reply.usage.input_tokens, outputTokens: reply.usage.output_tokens },
     };
   }
 

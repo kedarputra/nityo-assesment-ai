@@ -25,3 +25,16 @@ export function formatBusinessTime(moment: Date): string {
 export function formatBusinessDay(moment: Date): string {
   return dayFormat.format(moment);
 }
+
+// en-CA writes dates as ISO "2026-11-02".
+const isoDateFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+// The calendar day a moment falls on at Harbor Point: an email's order date (policy 1).
+export function businessDateOf(moment: Date): string {
+  return isoDateFormat.format(moment);
+}

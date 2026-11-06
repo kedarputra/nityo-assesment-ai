@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -195,3 +196,149 @@ export const signInThrottle = pgTable("sign_in_throttle", {
   windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
 });
+
+// ---- The agent's work -----------------------------------------------------------------------------
+
+// `routed`: the agent flagged the email for a person without proposing an ERP change.
+export const agentRunOutcomes = ["released", "proposal", "routed", "no_action", "failed"] as const;
+export type AgentRunOutcome = (typeof agentRunOutcomes)[number];
+
+export const gateVerdicts = ["released", "review"] as const;
+export type GateVerdict = (typeof gateVerdicts)[number];
+
+// One Agent run over one Email (speed and observability: the Agent run record). A run with no
+// `ended_at` is still reading. Cost is integer micro-dollars, so it is never a float.
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    modelId: text("model_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    modelCalls: integer("model_calls").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    estimatedCostMicroUsd: integer("estimated_cost_micro_usd").notNull().default(0),
+    outcome: text("outcome", { enum: agentRunOutcomes }),
+    gateVerdict: text("gate_verdict", { enum: gateVerdicts }),
+    errorClass: text("error_class"),
+  },
+  (table) => [
+    index("agent_runs_email_id_idx").on(table.emailId),
+    check("agent_runs_outcome_check", sql`${table.outcome} in ('released', 'proposal', 'routed', 'no_action', 'failed')`),
+    check("agent_runs_gate_verdict_check", sql`${table.gateVerdict} in ('released', 'review')`),
+  ],
+);
+
+export const proposalStatuses = ["open", "released"] as const;
+export type ProposalStatus = (typeof proposalStatuses)[number];
+
+// One release check's result, as the gate recorded it.
+export interface RecordedCheck {
+  check: string;
+  passes: boolean;
+  detail: string;
+}
+
+// A new order the agent proposed. The gate either released it (`so_number` set) or left it open
+// in the review queue with its failing checks. Ship-to and SKUs are the model's words until the
+// gate checks them, so they carry no foreign key.
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.customerId),
+    shipToId: text("ship_to_id").notNull(),
+    customerPo: text("customer_po"),
+    requestedDate: date("requested_date").notNull(),
+    totalCents: integer("total_cents").notNull(),
+    status: text("status", { enum: proposalStatuses }).notNull(),
+    checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
+    soNumber: text("so_number").references(() => salesOrders.soNumber),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("proposals_email_id_idx").on(table.emailId),
+    check("proposals_status_check", sql`${table.status} in ('open', 'released')`),
+  ],
+);
+
+// The price is always the system's; what the email or the model said is kept beside it.
+export const proposalLines = pgTable(
+  "proposal_lines",
+  {
+    proposalId: integer("proposal_id")
+      .notNull()
+      .references(() => proposals.id),
+    lineNo: integer("line_no").notNull(),
+    sku: text("sku").notNull(),
+    quantity: integer("quantity").notNull(),
+    // Null when the SKU is not in the catalog, so there is no system price.
+    unitPriceCents: integer("unit_price_cents"),
+    priceSource: text("price_source", { enum: ["contract", "list"] }),
+    statedPriceCents: integer("stated_price_cents"),
+    customerWords: text("customer_words"),
+  },
+  (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
+);
+
+export const agentFlags = pgTable("agent_flags", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  code: text("code").notNull(),
+  note: text("note").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// A reply the agent wrote for a person to edit and approve. It is never sent.
+export const draftReplies = pgTable("draft_replies", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Who acted: the agent, the release gate, or a named person.
+export const auditActors = ["agent", "gate", "person"] as const;
+export type AuditActor = (typeof auditActors)[number];
+
+// The append-only event log. Every agent step and gate verdict lands here in the same
+// transaction as the change it records.
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: serial("id").primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    actor: text("actor", { enum: auditActors }).notNull(),
+    userId: integer("user_id").references(() => users.id),
+    action: text("action").notNull(),
+    emailId: text("email_id").references(() => emails.emailId),
+    runId: text("run_id").references(() => agentRuns.runId),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+  },
+  (table) => [
+    index("audit_events_email_id_idx").on(table.emailId),
+    check("audit_events_actor_check", sql`${table.actor} in ('agent', 'gate', 'person')`),
+  ],
+);

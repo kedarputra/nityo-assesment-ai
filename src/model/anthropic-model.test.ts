@@ -11,7 +11,12 @@ function stubClient(reply: Partial<Anthropic.Message>) {
     messages: {
       create: async (params) => {
         sent.push(params);
-        return { content: [], stop_reason: "end_turn", ...reply } as Anthropic.Message;
+        return {
+          content: [],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0 },
+          ...reply,
+        } as Anthropic.Message;
       },
     },
   };
@@ -126,6 +131,15 @@ describe("AnthropicModel", () => {
     const model = new AnthropicModel({ client, modelId: "claude-opus-5-5" });
 
     expect((await model.send(request)).stopReason).toBe(expected);
+  });
+
+  it("reports the tokens the call used, for the Agent run record", async () => {
+    const { client } = stubClient({ usage: { input_tokens: 1200, output_tokens: 340 } as Anthropic.Usage });
+    const model = new AnthropicModel({ client, modelId: "claude-opus-5-5" });
+
+    const response = await model.send(request);
+
+    expect(response.usage).toEqual({ inputTokens: 1200, outputTokens: 340 });
   });
 
   it("refuses a reply block it does not understand rather than dropping it", async () => {

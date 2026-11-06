@@ -61,9 +61,16 @@ export interface ModelRequest {
 
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "refusal" | "other";
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface ModelResponse {
   message: AssistantMessage;
   stopReason: StopReason;
+  // What the call cost in tokens, for the Agent run record; a fake model may leave it out.
+  usage?: TokenUsage;
 }
 
 export interface Model {
