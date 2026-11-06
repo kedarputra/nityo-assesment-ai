@@ -1,7 +1,7 @@
 import type { RecordedCheck } from "@/db/schema";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
-import type { EmailWork, ProposalView } from "@/server/inbox/email-work";
+import type { EmailWork, ProposalLineView, ProposalView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
 import { RunAgentButton } from "./agent-run";
 import { StatusPill } from "./status-pill";
@@ -13,6 +13,9 @@ import { StatusPill } from "./status-pill";
 const CHECK_NAMES: Record<string, string> = {
   "known-contact": "A known contact sent it",
   "skus-sellable": "Every product can be sold",
+  "no-substitution": "No product swap",
+  "confident-skus": "Every product is clear",
+  "selling-units": "Quantities in selling units",
   "system-price": "System prices",
   "full-stock": "Fully in stock",
   "credit-hold": "Not on credit hold",
@@ -163,6 +166,7 @@ function Lines({ proposal }: { proposal: ProposalView }) {
               {line.productName ?? "Not in the catalog"}
               <br />
               <span className="id">{line.sku}</span>
+              {line.swappedFor ? <SwappedFor line={line} swappedFor={line.swappedFor} /> : null}
             </td>
             <td className="num">{line.quantity}</td>
             <td className="num">
@@ -182,6 +186,17 @@ function Lines({ proposal }: { proposal: ProposalView }) {
         </tr>
       </tfoot>
     </table>
+  );
+}
+
+// Policy 3 and U9: the person sees what the customer asked for and how the replacement differs.
+function SwappedFor({ line, swappedFor }: { line: ProposalLineView; swappedFor: NonNullable<ProposalLineView["swappedFor"]> }) {
+  const now = line.unitPriceCents === null ? "no price" : formatUsd(line.unitPriceCents);
+  return (
+    <p className="sub">
+      Swapped in for <span className="id">{swappedFor.sku}</span> {swappedFor.name}, which is discontinued: was{" "}
+      {swappedFor.pack} at {formatUsd(swappedFor.listPriceCents)}, now {line.pack ?? "–"} at {now}.
+    </p>
   );
 }
 

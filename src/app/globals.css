@@ -932,6 +932,12 @@ ul.rows {
   font-variant-numeric: tabular-nums;
 }
 
+.lines .sub {
+  margin-top: var(--s1);
+  font-size: 13px;
+  color: var(--warn);
+}
+
 .lines tfoot th,
 .lines tfoot td {
   font-weight: 700;

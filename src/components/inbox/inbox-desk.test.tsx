@@ -206,6 +206,8 @@ const e001Released: EmailWork = {
           lineNo: 1,
           sku: "HPS-1408",
           productName: "Wooden Cutlery Kit (fork, knife, napkin)",
+          pack: "250 kits",
+          swappedFor: null,
           quantity: 4,
           unitPriceCents: 4500,
           priceSource: "list",
@@ -268,6 +270,47 @@ describe("InboxDesk, the Proposal pane after a run", () => {
     expect(html).toContain("Why it’s waiting for you");
     expect(html).toContain("<b>System prices.</b> HPS-1408 stated $30.00, system $45.00.");
     expect(html).toContain("<summary>7 checks look good</summary>");
+  });
+
+  it("shows a swapped line with the discontinued product it replaces, and both packs and prices", () => {
+    // E019: HPS-1001 nitrile in place of discontinued HPS-1004 vinyl, at $68.00 instead of $45.00.
+    const swap: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [
+        {
+          id: 1,
+          status: "open",
+          soNumber: null,
+          customerName: "Northside Community Center",
+          shipToId: "S018",
+          shipToName: "Northside Community Center",
+          requestedDate: "2026-11-03",
+          totalCents: 27200,
+          checks: allChecksPass,
+          lines: [
+            {
+              lineNo: 1,
+              sku: "HPS-1001",
+              productName: "Nitrile Gloves, Blue, Medium",
+              pack: "10 boxes x 100 gloves",
+              swappedFor: { sku: "HPS-1004", name: "Vinyl Gloves, Clear, Medium", pack: "10 boxes x 100 gloves", listPriceCents: 4500 },
+              quantity: 4,
+              unitPriceCents: 6800,
+              priceSource: "list",
+              lineTotalCents: 27200,
+            },
+          ],
+        },
+      ],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, emailId: "E019", status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E019" }, selected: waiting, work: swap });
+
+    expect(html).toContain(
+      '<p class="sub">Swapped in for <span class="id">HPS-1004</span> Vinyl Gloves, Clear, Medium, which is discontinued: was 10 boxes x 100 gloves at $45.00, now 10 boxes x 100 gloves at $68.00.</p>',
+    );
   });
 
   it("says calmly when a run did not finish", () => {
