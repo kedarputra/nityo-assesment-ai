@@ -26,6 +26,7 @@ export function e001Script(): ModelResponse[] {
       customer_id: "C001",
       ship_to_id: "S001",
       requested_date: "2026-11-05",
+      requested_date_words: "Thursday",
       lines: e001Lines,
     }),
     callsTool("draft_reply", {

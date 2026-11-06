@@ -1,5 +1,5 @@
 {
-  "id": "53799c23-4796-48eb-b54f-c176c53a0ff8",
+  "id": "80833c9e-acc7-4c8e-83b2-ef37c048e21f",
   "prevId": "b919b5ba-5ac5-4f0e-bd64-a0157596200e",
   "version": "7",
   "dialect": "postgresql",
@@ -160,31 +160,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "request_kinds": {
-          "name": "request_kinds",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "no_action_reason": {
-          "name": "no_action_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "no_action_note": {
-          "name": "no_action_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "duplicate_of_email_id": {
-          "name": "duplicate_of_email_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -217,19 +192,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "agent_runs_duplicate_of_email_id_emails_email_id_fk": {
-          "name": "agent_runs_duplicate_of_email_id_emails_email_id_fk",
-          "tableFrom": "agent_runs",
-          "tableTo": "emails",
-          "columnsFrom": [
-            "duplicate_of_email_id"
-          ],
-          "columnsTo": [
-            "email_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -243,18 +205,6 @@
         "agent_runs_gate_verdict_check": {
           "name": "agent_runs_gate_verdict_check",
           "value": "\"agent_runs\".\"gate_verdict\" in ('released', 'review')"
-        },
-        "agent_runs_request_kinds_check": {
-          "name": "agent_runs_request_kinds_check",
-          "value": "\"agent_runs\".\"request_kinds\" <@ array['new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry', 'no action']::text[]"
-        },
-        "agent_runs_no_action_reason_check": {
-          "name": "agent_runs_no_action_reason_check",
-          "value": "\"agent_runs\".\"no_action_reason\" in ('spam', 'auto-reply', 'duplicate')"
-        },
-        "agent_runs_duplicate_of_check": {
-          "name": "agent_runs_duplicate_of_check",
-          "value": "(\"agent_runs\".\"no_action_reason\" is not distinct from 'duplicate') = (\"agent_runs\".\"duplicate_of_email_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -624,6 +574,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "ready_by": {
+          "name": "ready_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ready_at": {
+          "name": "ready_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -659,109 +621,16 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.email_notes": {
-      "name": "email_notes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
         },
-        "email_id": {
-          "name": "email_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_email_id": {
-          "name": "source_email_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "email_notes_email_id_idx": {
-          "name": "email_notes_email_id_idx",
-          "columns": [
-            {
-              "expression": "email_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "email_notes_email_id_emails_email_id_fk": {
-          "name": "email_notes_email_id_emails_email_id_fk",
-          "tableFrom": "email_notes",
-          "tableTo": "emails",
+        "draft_replies_ready_by_users_id_fk": {
+          "name": "draft_replies_ready_by_users_id_fk",
+          "tableFrom": "draft_replies",
+          "tableTo": "users",
           "columnsFrom": [
-            "email_id"
+            "ready_by"
           ],
           "columnsTo": [
-            "email_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "email_notes_source_email_id_emails_email_id_fk": {
-          "name": "email_notes_source_email_id_emails_email_id_fk",
-          "tableFrom": "email_notes",
-          "tableTo": "emails",
-          "columnsFrom": [
-            "source_email_id"
-          ],
-          "columnsTo": [
-            "email_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "email_notes_run_id_agent_runs_run_id_fk": {
-          "name": "email_notes_run_id_agent_runs_run_id_fk",
-          "tableFrom": "email_notes",
-          "tableTo": "agent_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "run_id"
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -1170,6 +1039,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_reason": {
+          "name": "decision_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1247,6 +1134,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "proposals_decided_by_users_id_fk": {
+          "name": "proposals_decided_by_users_id_fk",
+          "tableFrom": "proposals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1255,115 +1155,7 @@
       "checkConstraints": {
         "proposals_status_check": {
           "name": "proposals_status_check",
-          "value": "\"proposals\".\"status\" in ('open', 'released')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.routed_requests": {
-      "name": "routed_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "email_id": {
-          "name": "email_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "routed_requests_email_id_idx": {
-          "name": "routed_requests_email_id_idx",
-          "columns": [
-            {
-              "expression": "email_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "routed_requests_run_id_agent_runs_run_id_fk": {
-          "name": "routed_requests_run_id_agent_runs_run_id_fk",
-          "tableFrom": "routed_requests",
-          "tableTo": "agent_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "run_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "routed_requests_email_id_emails_email_id_fk": {
-          "name": "routed_requests_email_id_emails_email_id_fk",
-          "tableFrom": "routed_requests",
-          "tableTo": "emails",
-          "columnsFrom": [
-            "email_id"
-          ],
-          "columnsTo": [
-            "email_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "routed_requests_kind_check": {
-          "name": "routed_requests_kind_check",
-          "value": "\"routed_requests\".\"kind\" in ('new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry')"
-        },
-        "routed_requests_reason_check": {
-          "name": "routed_requests_reason_check",
-          "value": "\"routed_requests\".\"reason\" in ('quote', 'return', 'billing', 'inquiry', 'prospect', 'no-quantities', 'missing-attachment')"
+          "value": "\"proposals\".\"status\" in ('open', 'released', 'rejected', 'held')"
         }
       },
       "isRLSEnabled": false

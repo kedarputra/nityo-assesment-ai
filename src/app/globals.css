@@ -281,6 +281,11 @@ header .right {
   border-color: var(--accent-hover);
 }
 
+/* Destructive: the secondary shape with bad text (DESIGN.md, "Buttons"). */
+.btn--danger {
+  color: var(--bad);
+}
+
 .btn--ghost {
   border-color: transparent;
   background: transparent;
@@ -315,6 +320,27 @@ input {
 
 @media (max-width: 767px) {
   input {
+    font-size: 16px;
+  }
+}
+
+select,
+textarea {
+  font: 400 15px/1.45 var(--sans);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-md);
+}
+
+select {
+  min-height: var(--btn);
+  padding: 0 var(--s3);
+}
+
+@media (max-width: 767px) {
+  select,
+  textarea {
     font-size: 16px;
   }
 }
@@ -443,7 +469,8 @@ nav.tabs a[aria-current="page"] {
 }
 
 .pill--released,
-.pill--no_action {
+.pill--no_action,
+.pill--approved {
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -453,7 +480,13 @@ nav.tabs a[aria-current="page"] {
   color: var(--warn);
 }
 
-.pill--failed {
+.pill--on_hold {
+  background: var(--sunken);
+  color: var(--ink-muted);
+}
+
+.pill--failed,
+.pill--rejected {
   background: var(--bad-soft);
   color: var(--bad);
 }
@@ -967,6 +1000,12 @@ ul.rows {
   font-variant-numeric: tabular-nums;
 }
 
+.lines .sub {
+  margin-top: var(--s1);
+  font-size: 13px;
+  color: var(--warn);
+}
+
 .lines tfoot th,
 .lines tfoot td {
   font-weight: 700;
@@ -1022,6 +1061,167 @@ ul.rows {
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton {
+    animation: none;
+  }
+}
+
+/* Reviewing a Proposal (DESIGN.md, "Why it's waiting", "Lines", "Interaction") */
+.why-waiting--hard {
+  background: var(--bad-soft);
+}
+
+.check-body {
+  display: grid;
+  gap: var(--s2);
+  min-width: 0;
+  flex: 1;
+}
+
+.lock {
+  font-weight: 600;
+  color: var(--bad);
+}
+
+.override-note {
+  width: 100%;
+}
+
+.decision,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.decision-bar {
+  display: grid;
+  gap: var(--s2);
+}
+
+.inline-reason {
+  display: grid;
+  gap: var(--s2);
+}
+
+.inline-reason input {
+  width: 100%;
+}
+
+kbd {
+  font: 500 13px/1 var(--mono);
+  padding: 2px 5px;
+  border-radius: var(--r-sm);
+  border: 1px solid currentColor;
+  opacity: 0.75;
+}
+
+/* Keys are a desk's; phones and tablets get the buttons alone. */
+@media (max-width: 1199px) {
+  .desk-only {
+    display: none;
+  }
+}
+
+/* On a phone the decision sits in a sticky bar at the bottom, inside the safe area. */
+@media (max-width: 767px) {
+  .decision-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+    margin: 0 calc(-1 * var(--s4));
+    padding: var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));
+  }
+
+  .decision-bar .btn {
+    flex: 1;
+  }
+}
+
+.lines .qty {
+  width: 5.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines td .meta {
+  display: block;
+}
+
+.line-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.product-picker {
+  display: grid;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+.product-matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.product-matches .btn {
+  justify-content: flex-start;
+  text-align: left;
+  height: auto;
+  padding: var(--s2);
+  font-weight: 400;
+}
+
+/* The toast: bottom right on a desk, bottom centre above the action bar on a phone. */
+.toast-region {
+  position: fixed;
+  right: var(--s4);
+  bottom: calc(var(--s4) + env(safe-area-inset-bottom));
+  z-index: 20;
+  max-width: 440px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  background: var(--ink);
+  color: var(--canvas);
+  border-radius: var(--r-lg);
+  box-shadow: var(--pop);
+  padding: var(--s3) var(--s4);
+  animation: rise var(--base) var(--ease);
+}
+
+.btn--toast {
+  background: transparent;
+  color: var(--canvas);
+  border-color: currentColor;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (max-width: 767px) {
+  .toast-region {
+    left: var(--s3);
+    right: var(--s3);
+    max-width: none;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
     animation: none;
   }
 }

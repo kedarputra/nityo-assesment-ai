@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { agentRuns, users } from "@/db/schema";
+import { agentRuns, proposals, users } from "@/db/schema";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import {
@@ -8,7 +8,9 @@ import {
   findInboxEmail,
   isTipDismissed,
   listInboxEmails,
+  nextNeedingYou,
   parseInboxQuery,
+  type InboxEmail,
 } from "./inbox";
 
 describe("the inbox", () => {
@@ -114,5 +116,71 @@ describe("parseInboxQuery", () => {
       view: "list",
     });
     expect(parseInboxQuery({})).toEqual({ filter: "all", emailId: null, view: "list" });
+  });
+});
+
+describe("an email's status after a person decides", () => {
+  let testDatabase: TestDatabase;
+
+  beforeAll(async () => {
+    testDatabase = await createTestDatabase();
+    await ingestSnapshot(testDatabase.db);
+    const startedAt = new Date("2026-11-02T12:05:00Z");
+    const endedAt = new Date("2026-11-02T12:06:00Z");
+    const runs = ["E001", "E002", "E003", "E004", "E005"].map((emailId) => ({
+      runId: `run-${emailId}`,
+      emailId,
+      modelId: "fake",
+      startedAt,
+      endedAt,
+      outcome: "proposal" as const,
+    }));
+    await testDatabase.db.insert(agentRuns).values(runs);
+    const proposal = { customerId: "C001", shipToId: "S001", requestedDate: "2026-11-05", totalCents: 100, checks: [] };
+    await testDatabase.db.insert(proposals).values([
+      { ...proposal, runId: "run-E001", emailId: "E001", status: "released" },
+      { ...proposal, runId: "run-E002", emailId: "E002", status: "rejected" },
+      { ...proposal, runId: "run-E003", emailId: "E003", status: "held" },
+      // E004's run left two Proposals: one approved, one still open.
+      { ...proposal, runId: "run-E004", emailId: "E004", status: "released" },
+      { ...proposal, runId: "run-E004", emailId: "E004", status: "open" },
+      { ...proposal, runId: "run-E005", emailId: "E005", status: "rejected" },
+      { ...proposal, runId: "run-E005", emailId: "E005", status: "released" },
+    ]);
+  });
+
+  afterAll(async () => {
+    await testDatabase.close();
+  });
+
+  it("is approved, rejected or on hold once every Proposal is decided, and needs you while one is open", async () => {
+    const emails = await listInboxEmails(testDatabase.db);
+    const statuses = Object.fromEntries(emails.slice(0, 5).map((email) => [email.emailId, email.status]));
+
+    expect(statuses).toEqual({ E001: "approved", E002: "rejected", E003: "on_hold", E004: "needs_you", E005: "approved" });
+    expect(countByFilter(emails)).toEqual({ all: 40, "needs-you": 1, done: 3, other: 36 });
+  });
+});
+
+describe("nextNeedingYou", () => {
+  const at = new Date("2026-11-02T12:00:00Z");
+  const email = (emailId: string, status: InboxEmail["status"]): InboxEmail => ({
+    emailId,
+    receivedAt: at,
+    fromName: "Someone",
+    fromEmail: "someone@example.test",
+    subject: "An order",
+    status,
+  });
+  const inbox = [email("E001", "needs_you"), email("E002", "released"), email("E003", "approved"), email("E004", "failed")];
+
+  it("moves to the next email after this one that needs you, wrapping to the start", () => {
+    expect(nextNeedingYou(inbox, "E002")).toBe("E004");
+    expect(nextNeedingYou(inbox, "E004")).toBe("E001");
+    expect(nextNeedingYou(inbox, "E003")).toBe("E004");
+  });
+
+  it("is null when nothing else needs you", () => {
+    expect(nextNeedingYou([email("E001", "needs_you"), email("E002", "approved")], "E001")).toBeNull();
   });
 });

@@ -1,9 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import type { EmailWork } from "@/server/inbox/email-work";
+import { describe, expect, it, vi } from "vitest";
+import type { EmailWork, ProposalView } from "@/server/inbox/email-work";
 import type { InboxEmail, InboxEmailWithBody, InboxQuery } from "@/server/inbox/inbox";
 import { countByFilter, isInFilter } from "@/server/inbox/inbox";
 import { InboxDesk, type InboxDeskProps } from "./inbox-desk";
+
+// The desk moves between emails through the app router, which a static render does not mount.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const maria: InboxEmailWithBody = {
   emailId: "E001",
@@ -199,6 +202,8 @@ const e001Released: EmailWork = {
       shipToId: "S001",
       shipToName: "Bluefin Bistro - Pier Street",
       requestedDate: "2026-11-05",
+      requestedDateWords: "Thursday",
+      requestedDateAlternative: null,
       totalCents: 67200,
       checks: allChecksPass,
       lines: [
@@ -206,18 +211,24 @@ const e001Released: EmailWork = {
           lineNo: 1,
           sku: "HPS-1408",
           productName: "Wooden Cutlery Kit (fork, knife, napkin)",
+          pack: "250 kits",
+          swappedFor: null,
           quantity: 4,
           unitPriceCents: 4500,
           priceSource: "list",
           lineTotalCents: 18000,
+          customerWords: "HPS-1408  x 4",
+          available: 26,
         },
       ],
+      decision: null,
+      shipToChoices: [{ shipToId: "S001", name: "Bluefin Bistro - Pier Street" }],
     },
   ],
   routed: [],
   noAction: null,
   flags: [],
-  draftReply: "Hi Maria, SO-24059 is confirmed for Thursday.",
+  draftReply: { body: "Hi Maria, SO-24059 is confirmed for Thursday.", readyBy: null, readyAt: null },
   notes: [],
 };
 
@@ -239,10 +250,13 @@ describe("InboxDesk, the Proposal pane after a run", () => {
     expect(html).not.toContain("Why it’s waiting for you");
     expect(html).toContain('<span class="id">HPS-1408</span>');
     expect(html).toContain("$180.00");
-    expect(html).toContain(
-      '<textarea id="draft-reply" class="reading" readOnly="" rows="8">Hi Maria, SO-24059 is confirmed for Thursday.</textarea>',
-    );
+    expect(html).toMatch(/<textarea id="draft-reply" class="reading"[^>]*>Hi Maria, SO-24059 is confirmed for Thursday.<\/textarea>/);
+    expect(html).not.toMatch(/<textarea[^>]*readOnly/);
+    expect(html).toContain("Mark reply ready");
     expect(html).toContain("We never send email from here; this is what would go out.");
+    // A released order has nothing left to decide.
+    expect(html).not.toContain("Approve &amp; release");
+    expect(html).not.toContain("Reject…");
     expect(html).toContain("1 of 2 handled");
   });
 
@@ -271,6 +285,89 @@ describe("InboxDesk, the Proposal pane after a run", () => {
     expect(html).toContain("Why it’s waiting for you");
     expect(html).toContain("<b>System prices.</b> HPS-1408 stated $30.00, system $45.00.");
     expect(html).toContain("<summary>7 checks look good</summary>");
+  });
+
+  it("shows both dates ambiguous words could mean, and what a person can choose for short stock", () => {
+    const [proposal] = e001Released.proposals;
+    if (!proposal) throw new Error("no proposal");
+    const review: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [
+        {
+          ...proposal,
+          status: "open",
+          soNumber: null,
+          requestedDate: "2026-11-03",
+          requestedDateWords: "next Tuesday",
+          requestedDateAlternative: "2026-11-10",
+          checks: [
+            {
+              check: "full-stock",
+              passes: false,
+              detail: "Not enough available: HPS-1302 wants 12, 5 available, 40 due Mon 9 Nov (PO-7712).",
+              flags: ["P2-short-stock"],
+              choices: ["HPS-1302: ship 5 now and the other 7 from Mon 9 Nov", "HPS-1302: backorder all 12 for Mon 9 Nov"],
+            },
+          ],
+        },
+      ],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: waiting, work: review });
+
+    expect(html).toContain("wanted Tue 3 Nov or Tue 10 Nov (“next Tuesday”)");
+    expect(html).toContain(
+      "Choices: HPS-1302: ship 5 now and the other 7 from Mon 9 Nov; HPS-1302: backorder all 12 for Mon 9 Nov.",
+    );
+  });
+
+  it("shows a swapped line with the discontinued product it replaces, and both packs and prices", () => {
+    // E019: HPS-1001 nitrile in place of discontinued HPS-1004 vinyl, at $68.00 instead of $45.00.
+    const swap: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [
+        {
+          id: 1,
+          status: "open",
+          soNumber: null,
+          customerName: "Northside Community Center",
+          shipToId: "S018",
+          shipToName: "Northside Community Center",
+          requestedDate: "2026-11-03",
+          requestedDateWords: null,
+          requestedDateAlternative: null,
+          totalCents: 27200,
+          checks: allChecksPass,
+          lines: [
+            {
+              lineNo: 1,
+              sku: "HPS-1001",
+              productName: "Nitrile Gloves, Blue, Medium",
+              pack: "10 boxes x 100 gloves",
+              swappedFor: { sku: "HPS-1004", name: "Vinyl Gloves, Clear, Medium", pack: "10 boxes x 100 gloves", listPriceCents: 4500 },
+              quantity: 4,
+              unitPriceCents: 6800,
+              priceSource: "list",
+              lineTotalCents: 27200,
+              customerWords: null,
+              available: 40,
+            },
+          ],
+          decision: null,
+          shipToChoices: [{ shipToId: "S018", name: "Northside Community Center" }],
+        },
+      ],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, emailId: "E019", status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E019" }, selected: waiting, work: swap });
+
+    expect(html).toContain(
+      '<p class="sub">Swapped in for <span class="id">HPS-1004</span> Vinyl Gloves, Clear, Medium, which is discontinued: was 10 boxes x 100 gloves at $45.00, now 10 boxes x 100 gloves at $68.00.</p>',
+    );
   });
 
   it("says calmly when a run did not finish", () => {
@@ -336,7 +433,7 @@ describe("InboxDesk, routed and no-action emails", () => {
       ...nothingElse,
       run: { runId: "run-9", finished: true, outcome: "routed", errorClass: null, requestKinds: ["quote request"] },
       routed: [{ kind: "quote request", reason: "quote", summary: "Ben wants a quote: $1,980.00 at list." }],
-      draftReply: "Hi Ben, here is your quote.",
+      draftReply: { body: "Hi Ben, here is your quote.", readyBy: null, readyAt: null },
     };
 
     const html = renderDesk({ emails: [listed(ben)], query: { emailId: "E009" }, selected: ben, work });
@@ -386,5 +483,90 @@ describe("InboxDesk, routed and no-action emails", () => {
     expect(html).toContain('<h2 class="headline">A question about an earlier order</h2>');
     expect(html).toContain('class="lines"');
     expect(html).toContain('<a href="/?filter=all&amp;email=E028">E028</a> Away until 9 November.');
+  });
+});
+
+describe("InboxDesk, reviewing a Proposal", () => {
+  const released = e001Released.proposals[0];
+  if (released === undefined) throw new Error("no proposal");
+  const base: ProposalView = released;
+  const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+  function withProposal(proposal: Partial<EmailWork["proposals"][number]>, work: Partial<EmailWork> = {}): string {
+    const review: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [{ ...base, status: "open", soNumber: null, ...proposal }],
+      ...work,
+    };
+    return renderDesk({ query: { emailId: "E001" }, selected: waiting, work: review });
+  }
+
+  const failing = (names: string[]) =>
+    allChecksPass.map((check) => (names.includes(check.check) ? { ...check, passes: false, detail: `${check.check} fails.` } : check));
+
+  it("asks for a note on each soft check and offers Approve & release, Put on hold… and Reject…", () => {
+    const html = withProposal({ checks: failing(["no-flags"]) });
+
+    expect(html).toContain('placeholder="Add a quick note about why it’s OK…"');
+    expect(html).toContain("Approve &amp; release");
+    expect(html).toContain("Put on hold…");
+    expect(html).toContain("Reject…");
+    expect(html).toContain('<kbd class="desk-only">a</kbd>');
+    expect(html).toContain("Approving keeps your note in the audit log.");
+  });
+
+  it("offers only Put on hold… and Reject… on a hard rule, with a lock instead of a note", () => {
+    const html = withProposal({ checks: failing(["credit-hold", "credit-limit"]) });
+
+    expect(html).not.toContain("Approve &amp; release");
+    expect(html).toContain("Put on hold…");
+    expect(html).toContain("Reject…");
+    expect(html).toContain("Can’t be overridden. Accounts needs to clear this first.");
+    expect(html).not.toContain("Add a quick note about why it’s OK…");
+    expect(html).toContain("Bluefin Bistro Group can’t get this order yet ($672.00)");
+  });
+
+  it("lets quantities, products, lines and the ship-to change, but never the price", () => {
+    const html = withProposal({
+      checks: failing(["no-flags"]),
+      shipToChoices: [
+        { shipToId: "S001", name: "Bluefin Bistro - Pier Street" },
+        { shipToId: "S002", name: "Bluefin Bistro - Harbor Ave" },
+      ],
+    });
+
+    expect(html).toMatch(/<input[^>]*type="number"[^>]*aria-label="Quantity of HPS-1408"[^>]*value="4"/);
+    expect(html).toContain("Change product");
+    expect(html).toContain("+ Add a line");
+    expect(html).toMatch(/<select id="ship-to-1"/);
+    expect(html).not.toMatch(/aria-label="Price/);
+  });
+
+  it("shows who decided and why once a Proposal is on hold, and still offers the decision", () => {
+    const html = withProposal({
+      status: "held",
+      checks: failing(["credit-hold"]),
+      decision: { by: "ops.reviewer", at: new Date("2026-11-02T15:00:00Z"), reason: "Waiting for accounts." },
+    });
+
+    expect(html).toContain("On hold");
+    expect(html).toContain("by ops.reviewer");
+    expect(html).toContain("“Waiting for accounts.”");
+    expect(html).not.toContain("Put on hold…");
+    expect(html).toContain("Reject…");
+  });
+
+  it("locks a reply marked ready and says who marked it", () => {
+    const html = withProposal(
+      { status: "rejected", decision: { by: "ops.reviewer", at: new Date(), reason: "Customer cancelled." } },
+      { draftReply: { body: "Sorry, Maria.", readyBy: "ops.reviewer", readyAt: new Date() } },
+    );
+
+    expect(html).toMatch(/<textarea id="draft-reply"[^>]*readOnly=""/);
+    expect(html).toContain("Reply ready");
+    expect(html).not.toContain("Mark reply ready");
+    expect(html).toContain("The order from Bluefin Bistro Group was rejected");
+    expect(html).not.toContain("Reject…");
   });
 });

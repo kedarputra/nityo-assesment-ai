@@ -9,6 +9,7 @@ import {
   incomingSupply,
   inventory,
   noActionReasons,
+  productSearches,
   products,
   proposals,
   routeReasons,
@@ -18,6 +19,8 @@ import {
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
+import { usualOrder } from "@/rules/order-history";
+import { searchCatalog } from "./product-search";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
 import { closeNoAction, routeToPerson, writeDraftReply } from "./requests";
 import { ToolError } from "./tool-error";
@@ -119,6 +122,41 @@ const getProduct = tool({
   },
 });
 
+const attribute = (example: string) =>
+  z.string().min(1).max(60).optional().describe(`In the catalog's English words, e.g. ${example}.`);
+
+const searchProducts = tool({
+  name: "search_products",
+  description:
+    "Find the SKU for a product the customer describes in words. Give what it is and any size, colour or material the customer stated, translated into the catalog's English words. Returns the ACTIVE candidates that fit every attribute (exactly one is a confident match), near matches when none fit, and any DISCONTINUED product that fits with its replacement. Cite the result's searchId on the order line.",
+  input: z.strictObject({
+    description: z
+      .string()
+      .min(1)
+      .max(100)
+      .describe("What the product is, in the catalog's English words, e.g. \"toilet tissue\" or \"trash liners\"."),
+    size: attribute("\"jumbo\", \"55 gal\", \"large\", \"1000 ml\""),
+    colour: attribute("\"white\" or \"black\""),
+    material: attribute("\"nitrile\" or \"vinyl\""),
+  }),
+  async run(tx, context, input) {
+    const catalog = await tx.select().from(products);
+    const result = searchCatalog(catalog, input);
+    const [search] = await tx
+      .insert(productSearches)
+      .values({
+        runId: context.runId,
+        emailId: context.emailId,
+        query: input,
+        candidateSkus: result.candidates.map((candidate) => candidate.sku),
+        discontinuedSkus: result.discontinued.map((product) => product.sku),
+      })
+      .returning({ id: productSearches.id });
+    if (!search) throw new Error("The search was not stored.");
+    return { searchId: search.id, confident: result.candidates.length === 1, ...result };
+  },
+});
+
 const priceLine = tool({
   name: "price_line",
   description:
@@ -198,6 +236,32 @@ const getOrders = tool({
   },
 });
 
+const getUsualOrder = tool({
+  name: "get_usual_order",
+  description:
+    "What \"same as last time\" and \"the usual\" mean for a customer, worked out from their recent sales orders: the latest order's lines, the lines common to the recent orders (the usual), and the lines on only some of them, to offer in the reply rather than add.",
+  input: z.strictObject({ customer_id: customerId }),
+  async run(tx, _context, input) {
+    const orders = await tx
+      .select({ soNumber: salesOrders.soNumber, orderDate: salesOrders.orderDate })
+      .from(salesOrders)
+      .where(eq(salesOrders.customerId, input.customer_id));
+    const lines =
+      orders.length === 0
+        ? []
+        : await tx
+            .select({ soNumber: salesOrderLines.soNumber, sku: salesOrderLines.sku, qtyOrdered: salesOrderLines.qtyOrdered })
+            .from(salesOrderLines)
+            .where(
+              inArray(
+                salesOrderLines.soNumber,
+                orders.map((order) => order.soNumber),
+              ),
+            );
+    return usualOrder(orders.map((order) => ({ ...order, lines: lines.filter((line) => line.soNumber === order.soNumber) })));
+  },
+});
+
 const proposeNewOrderTool = tool({
   name: "propose_new_order",
   description:
@@ -205,7 +269,15 @@ const proposeNewOrderTool = tool({
   input: z.strictObject({
     customer_id: customerId,
     ship_to_id: z.string().min(1).max(20),
-    requested_date: z.iso.date().describe("The delivery date the customer asked for, YYYY-MM-DD."),
+    requested_date: z.iso
+      .date()
+      .describe("The delivery date the customer asked for, YYYY-MM-DD; when the email names none, the date you propose."),
+    requested_date_words: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("The email's own words for the date, verbatim (\"next Tuesday\", \"by Friday October 30\"). The system reads them itself."),
     customer_po: z.string().min(1).max(60).nullable().optional(),
     lines: z
       .array(
@@ -219,6 +291,33 @@ const proposeNewOrderTool = tool({
             .optional()
             .describe("Only if the email names a price per selling unit, in cents."),
           customer_words: z.string().max(200).optional().describe("How the customer wrote this line."),
+          from_sales_order: z
+            .string()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe("The earlier sales order this line repeats, when the email asks for the usual or the same as last time."),
+          search_id: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("The search_products result this SKU was chosen from, when the customer described the product in words."),
+          unit_as_written: z
+            .string()
+            .min(1)
+            .max(40)
+            .optional()
+            .describe("The unit the customer wrote, as written (\"cases\", \"boxes\", \"rollos\"), if they wrote one."),
+          quantity_as_written: z
+            .number()
+            .positive()
+            .max(100_000)
+            .optional()
+            .describe("The amount the customer wrote, when it differs from the whole selling units in quantity."),
+          replaces_sku: sku
+            .optional()
+            .describe("The DISCONTINUED SKU the customer asked for, when this line is its replacement."),
         }),
       )
       .min(1)
@@ -238,12 +337,18 @@ const proposeNewOrderTool = tool({
         customerId: input.customer_id,
         shipToId: input.ship_to_id,
         requestedDate: input.requested_date,
+        requestedDateWords: input.requested_date_words ?? null,
         customerPo: input.customer_po ?? null,
         lines: input.lines.map((line) => ({
           sku: line.sku,
           quantity: line.quantity,
           statedUnitPriceCents: line.stated_unit_price_cents ?? null,
           customerWords: line.customer_words ?? null,
+          fromSalesOrder: line.from_sales_order ?? null,
+          productSearchId: line.search_id ?? null,
+          unitAsWritten: line.unit_as_written ?? null,
+          quantityAsWritten: line.quantity_as_written ?? null,
+          replacesSku: line.replaces_sku ?? null,
         })),
       },
     );
@@ -251,6 +356,8 @@ const proposeNewOrderTool = tool({
       proposalId: result.proposalId,
       outcome: result.verdict === "released" ? `released as ${result.soNumber}` : "waiting for a person to review",
       soNumber: result.soNumber,
+      requestedDate: result.requestedDate,
+      requestedDateAlternative: result.requestedDateAlternative,
       totalCents: result.totalCents,
       failingChecks: result.checks.filter((check) => !check.passes),
     };
@@ -321,10 +428,12 @@ export const agentTools: readonly AgentTool[] = [
   findCustomer,
   listShipTos,
   getProduct,
+  searchProducts,
   priceLine,
   checkStock,
   checkCredit,
   getOrders,
+  getUsualOrder,
   proposeNewOrderTool,
   draftReply,
   raiseFlag,

@@ -1,26 +1,18 @@
 import Link from "next/link";
-import type { NoActionReason, RecordedCheck, RequestKind, RouteReason } from "@/db/schema";
+import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
+import { isHardRule } from "@/agent/release-checks";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
 import type { EmailWork, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
 import { RunAgentButton } from "./agent-run";
+import { CheckList, PassingChecks } from "./checks";
+import { DraftReplyEditor, ProposalReview, SwappedFor } from "./proposal-review";
 import { StatusPill } from "./status-pill";
 
 // The Proposal pane (DESIGN.md, "Components"): what the agent did with the chosen email, why
-// anything is waiting for a person, the lines, and the Draft reply. Everything the model wrote is
-// untrusted (security 4), so it is only ever rendered as text.
-
-const CHECK_NAMES: Record<string, string> = {
-  "known-contact": "A known contact sent it",
-  "skus-sellable": "Every product can be sold",
-  "system-price": "System prices",
-  "full-stock": "Fully in stock",
-  "credit-hold": "Not on credit hold",
-  "credit-limit": "Within the credit limit",
-  "ship-to": "One clear ship-to",
-  "no-flags": "Nothing flagged",
-};
+// anything is waiting for a person, the lines, the decision, and the Draft reply. Everything the
+// model wrote is untrusted (security 4), so it is only ever rendered as text.
 
 // The kind tag's words (DESIGN.md, "Kind tag").
 const KIND_NAMES: Record<RequestKind, string> = {
@@ -57,20 +49,22 @@ export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null
   if (!work.run.finished) return <StillReading />;
   if (work.run.outcome === "failed") return <RunDidNotFinish email={email} errorClass={work.run.errorClass} />;
 
+  // The first undecided Proposal takes the desk's keys.
+  const firstUndecided = work.proposals.find(isUndecided)?.id ?? null;
   return (
     <div className="proposal">
       <StatusPill status={email.status} />
       {work.run.requestKinds.length > 0 ? <KindTags kinds={work.run.requestKinds} /> : null}
       {work.noAction ? <NoActionCard noAction={work.noAction} /> : null}
       {work.proposals.map((proposal) => (
-        <ProposalCard key={proposal.id} proposal={proposal} />
+        <ProposalCard key={proposal.id} proposal={proposal} takesKeys={proposal.id === firstUndecided} />
       ))}
       {work.routed.map((request, index) => (
         <RoutedCard key={index} request={request} />
       ))}
       {work.flags.length > 0 ? <Flags flags={work.flags} /> : null}
       {work.notes.length > 0 ? <Notes notes={work.notes} /> : null}
-      {work.draftReply !== null ? <DraftReply body={work.draftReply} /> : null}
+      {work.draftReply !== null ? <DraftReplyEditor emailId={email.emailId} reply={work.draftReply} /> : null}
     </div>
   );
 }
@@ -179,9 +173,12 @@ function Notes({ notes }: { notes: EmailWork["notes"] }) {
   );
 }
 
-function ProposalCard({ proposal }: { proposal: ProposalView }) {
+function isUndecided(proposal: ProposalView): boolean {
+  return proposal.status === "open" || proposal.status === "held";
+}
+
+function ProposalCard({ proposal, takesKeys }: { proposal: ProposalView; takesKeys: boolean }) {
   const failing = proposal.checks.filter((check) => !check.passes);
-  const passing = proposal.checks.filter((check) => check.passes);
 
   return (
     <article className="proposal-card">
@@ -189,52 +186,73 @@ function ProposalCard({ proposal }: { proposal: ProposalView }) {
       <p className="meta">
         {proposal.customerName} · {proposal.shipToName ?? <span className="id">{proposal.shipToId}</span>} · wanted{" "}
         {formatRequestedDate(proposal.requestedDate)}
+        {proposal.requestedDateAlternative ? ` or ${formatRequestedDate(proposal.requestedDateAlternative)}` : null}
+        {proposal.requestedDateWords ? ` (“${proposal.requestedDateWords}”)` : null}
       </p>
-      {failing.length > 0 ? (
-        <section className="why-waiting" aria-label="Why it’s waiting for you">
-          <h3 className="section-name">Why it’s waiting for you</h3>
-          <CheckList checks={failing} />
-        </section>
-      ) : null}
-      {passing.length > 0 ? (
-        <details className="checks-ok">
-          <summary>
-            {passing.length} {passing.length === 1 ? "check looks" : "checks look"} good
-          </summary>
-          <CheckList checks={passing} />
-        </details>
-      ) : null}
-      <Lines proposal={proposal} />
+      {proposal.decision ? <Decision proposal={proposal} /> : null}
+      {isUndecided(proposal) ? (
+        <ProposalReview proposal={proposal} takesKeys={takesKeys} />
+      ) : (
+        <>
+          {failing.length > 0 ? (
+            <section className="why-waiting" aria-label="Why it was waiting">
+              <h3 className="section-name">Why it was waiting</h3>
+              <CheckList checks={failing} />
+            </section>
+          ) : null}
+          <PassingChecks checks={proposal.checks} />
+          <Lines proposal={proposal} />
+        </>
+      )}
     </article>
   );
 }
 
 function headline(proposal: ProposalView): string {
   const total = formatUsd(proposal.totalCents);
-  if (proposal.status === "released" && proposal.soNumber) {
-    return `Released ${proposal.soNumber}: ${total} for ${proposal.customerName}`;
+  switch (proposal.status) {
+    case "released":
+      if (proposal.decision) return `You released ${proposal.soNumber ?? "the order"} for ${proposal.customerName}, ${total}`;
+      return `Released ${proposal.soNumber ?? "the order"}: ${total} for ${proposal.customerName}`;
+    case "rejected":
+      return `The order from ${proposal.customerName} was rejected`;
+    case "held":
+      return `The order from ${proposal.customerName} is on hold, ${total}`;
+    case "open":
+      if (proposal.checks.some((check) => !check.passes && isHardRule(check.check))) {
+        return `${proposal.customerName} can’t get this order yet (${total})`;
+      }
+      return `New order for ${proposal.customerName}, ${total}, waiting for you`;
   }
-  return `New order for ${proposal.customerName}, ${total}, waiting for you`;
 }
+
+// Who decided, and the reason they gave for a reject or a hold.
+function Decision({ proposal }: { proposal: ProposalView }) {
+  const { decision } = proposal;
+  if (!decision) return null;
+  const words = DECISION_WORDS[proposal.status];
+  return (
+    <p className="decision">
+      <span className={`pill pill--${words.pill}`}>
+        <span aria-hidden="true">{words.icon}</span>
+        {words.label}
+      </span>{" "}
+      <span className="meta">by {decision.by}</span>
+      {decision.reason ? <span className="meta"> · “{decision.reason}”</span> : null}
+    </p>
+  );
+}
+
+const DECISION_WORDS: Record<ProposalView["status"], { pill: string; icon: string; label: string }> = {
+  released: { pill: "approved", icon: "✓", label: "Approved" },
+  rejected: { pill: "rejected", icon: "✕", label: "Rejected" },
+  held: { pill: "on_hold", icon: "◐", label: "On hold" },
+  open: { pill: "needs_you", icon: "!", label: "Needs you" },
+};
 
 // A requested date is a calendar day; noon at Harbor Point keeps it on that day in any zone.
 function formatRequestedDate(isoDate: string): string {
   return formatBusinessDay(new Date(`${isoDate}T12:00:00-05:00`));
-}
-
-function CheckList({ checks }: { checks: RecordedCheck[] }) {
-  return (
-    <ul className="checks">
-      {checks.map((check) => (
-        <li key={check.check}>
-          <span aria-hidden="true">{check.passes ? "✓" : "!"}</span>
-          <span>
-            <b>{CHECK_NAMES[check.check] ?? check.check}.</b> {check.detail}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 function Lines({ proposal }: { proposal: ProposalView }) {
@@ -261,6 +279,7 @@ function Lines({ proposal }: { proposal: ProposalView }) {
               {line.productName ?? "Not in the catalog"}
               <br />
               <span className="id">{line.sku}</span>
+              {line.swappedFor ? <SwappedFor line={line} swappedFor={line.swappedFor} /> : null}
             </td>
             <td className="num">{line.quantity}</td>
             <td className="num">
@@ -297,19 +316,6 @@ function Flags({ flags }: { flags: EmailWork["flags"] }) {
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-// Editing and "Mark reply ready" arrive with the review actions; for now the draft is shown as is.
-function DraftReply({ body }: { body: string }) {
-  return (
-    <section className="reply">
-      <h3 className="section-name">
-        <label htmlFor="draft-reply">Reply to customer</label>
-      </h3>
-      <textarea id="draft-reply" className="reading" readOnly value={body} rows={8} />
-      <p className="meta">We never send email from here; this is what would go out.</p>
     </section>
   );
 }

@@ -182,13 +182,15 @@ describe("Requests that are routed or need no action", () => {
     const result = await run("E027", [
       callsTool("find_customer", { email: "goldenspoondiner@mail.example" }),
       callsTool("get_orders", { customer_id: "C014" }),
+      callsTool("search_products", { description: "clamshell container" }),
+      callsTool("search_products", { description: "dinner napkins" }),
       callsTool("propose_new_order", {
         customer_id: "C014",
         ship_to_id: "S017",
         requested_date: "2026-11-02",
         lines: [
-          { sku: "HPS-1401", quantity: 3, customer_words: "3 cases of the takeout clamshells" },
-          { sku: "HPS-1407", quantity: 1, customer_words: "1 case of napkins" },
+          { sku: "HPS-1401", quantity: 3, search_id: 1, unit_as_written: "cases", customer_words: "3 cases of the takeout clamshells" },
+          { sku: "HPS-1407", quantity: 1, search_id: 2, unit_as_written: "case", customer_words: "1 case of napkins" },
         ],
       }),
       callsTool("route_to_person", {
