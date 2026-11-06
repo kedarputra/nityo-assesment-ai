@@ -17,6 +17,10 @@ decisions this page carries out:
 | to `main` (a merged PR) | production, at the live URL | Neon `main` branch | `harbor-point-production` |
 | to any other branch | a preview, at its own URL | Neon `preview` branch, shared by every preview | `harbor-point-preview` |
 
+The tests do not run in Vercel's build. GitHub Actions runs `make check` on every pull request and
+every push to `main` ([`.github/workflows/check.yml`](../.github/workflows/check.yml)); require
+its `check` job in `main`'s branch protection so a red PR cannot merge, and so cannot deploy.
+
 Every build runs [`vercel.json`](../vercel.json)'s build command:
 
 ```sh

@@ -1,0 +1,30 @@
+# The full check on every pull request and every push to main: lint, the type check, every test,
+# the production build and `npm audit` (Makefile, `make check`). Vercel deploys through its own Git
+# integration; this workflow is the gate in front of it. No step needs a secret: tests run on PGlite
+# and a fake model, so nothing here reaches a database server or a paid API.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: make setup
+      - run: make check
