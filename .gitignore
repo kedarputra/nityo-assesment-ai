@@ -18,3 +18,9 @@ node_modules/
 # macOS
 .DS_Store
 .gstack/
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
