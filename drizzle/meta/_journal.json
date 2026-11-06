@@ -8,6 +8,13 @@
       "when": 1793975836610,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793976476201,
+      "tag": "0001_users_and_sessions",
+      "breakpoints": true
     }
   ]
 }
