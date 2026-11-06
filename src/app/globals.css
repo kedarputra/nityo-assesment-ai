@@ -1045,13 +1045,7 @@ ul.rows {
   width: 100%;
 }
 
-.decision {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s2);
-}
-
+.decision,
 .actions {
   display: flex;
   flex-wrap: wrap;

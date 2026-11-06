@@ -93,9 +93,7 @@ export async function approveProposalAction(input: unknown): Promise<ReviewActio
       if (hardRules.length > 0) {
         return refused(
           "This order can’t be released from here: a hard rule can’t be overridden. Put it on hold or reject it.",
-          {
-            hardRules,
-          },
+          { hardRules },
         );
       }
       return refused("Add a quick note about why it’s OK.", { missingNotes: result.missingNotes });

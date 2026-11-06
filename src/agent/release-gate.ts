@@ -179,9 +179,7 @@ export async function checkOrder(tx: Database, order: OrderToCheck): Promise<Che
   if (!customer) throw new ToolError(`There is no customer ${order.customerId}.`);
 
   const lines = await priceLines(tx, order);
-  const pricedLines = lines.flatMap((line) =>
-    line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : [],
-  );
+  const pricedLines = sellableLines(lines);
   const totalCents = pricedLines.length > 0 ? orderValue({ lines: pricedLines }).totalCents : 0;
 
   const contacts = await tx

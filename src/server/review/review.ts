@@ -210,8 +210,9 @@ export async function setProposalAside(
   if (!parsed.success) throw new ReviewRefused("Add a short note so the team knows why.");
   return db.transaction(async (tx) => {
     const { proposal } = await decidableProposal(tx, decision.proposalId);
-    if (decision.kind === "hold" && proposal.status === "held")
+    if (decision.kind === "hold" && proposal.status === "held") {
       throw new ReviewRefused("This Proposal is already on hold.");
+    }
     const status = decision.kind === "reject" ? "rejected" : "held";
     await tx
       .update(proposals)
