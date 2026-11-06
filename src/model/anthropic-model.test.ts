@@ -130,7 +130,7 @@ describe("AnthropicModel", () => {
 
   it("refuses a reply block it does not understand rather than dropping it", async () => {
     const { client } = stubClient({
-      content: [{ type: "server_tool_use", id: "srv_1", name: "web_search", input: {} }],
+      content: [{ type: "server_tool_use", id: "srv_1", name: "web_search", input: {}, caller: { type: "direct" } }],
     });
     const model = new AnthropicModel({ client, modelId: "claude-opus-5-5" });
 
