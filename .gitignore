@@ -11,6 +11,9 @@ node_modules/
 /.claude/worktrees/
 
 .vercel/
+.agents/
+
+.sandcastle/
 
 # macOS
 .DS_Store
