@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Database } from "@/db/database";
 import {
@@ -6,6 +6,7 @@ import {
   agentRuns,
   customers,
   draftReplies,
+  emailLinks,
   emailNotes,
   inventory,
   products,
@@ -24,8 +25,8 @@ import {
 
 // What the agent did with one email, for the Proposal pane: its latest run and the Request kinds
 // it found, the Proposals that run made with their checks, lines and a person's decision, the
-// Requests it routed to a person or why it closed the email, its flags, its Draft reply, and notes
-// other emails left here.
+// Requests it routed to a person or why it closed the email, its flags, its Draft reply, its notes
+// for the reviewer, notes other emails left here, and the emails it is linked with.
 
 export interface ProposalLineView {
   lineNo: number;
@@ -102,8 +103,12 @@ export interface EmailWork {
   noAction: NoActionView | null;
   flags: { code: string; note: string }[];
   draftReply: DraftReplyView | null;
-  // Information another email carries for this one's Requests (U17), whichever run left it.
+  // Information another email carries for this one's Requests (U17, U6), whichever run left it.
   notes: { sourceEmailId: string; note: string }[];
+  // What the run noted for this email's reviewer that is not a review reason (U5, U8).
+  context: string[];
+  // The emails this one is linked with, either way round (ticket 08 of the map), each once.
+  related: { emailId: string; why: string }[];
 }
 
 const replacedProducts = alias(products, "replaced_products");
@@ -204,8 +209,18 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
   const notes = await db
     .select({ sourceEmailId: emailNotes.sourceEmailId, note: emailNotes.note })
     .from(emailNotes)
-    .where(eq(emailNotes.emailId, emailId))
+    .where(and(eq(emailNotes.emailId, emailId), ne(emailNotes.sourceEmailId, emailId)))
     .orderBy(asc(emailNotes.id));
+  const context = await db
+    .select({ note: emailNotes.note })
+    .from(emailNotes)
+    .where(and(eq(emailNotes.runId, run.runId), eq(emailNotes.emailId, emailId), eq(emailNotes.sourceEmailId, emailId)))
+    .orderBy(asc(emailNotes.id));
+  const links = await db
+    .select({ emailId: emailLinks.emailId, relatedEmailId: emailLinks.relatedEmailId, why: emailLinks.why })
+    .from(emailLinks)
+    .where(or(eq(emailLinks.runId, run.runId), eq(emailLinks.relatedEmailId, emailId)))
+    .orderBy(asc(emailLinks.id));
 
   return {
     run: {
@@ -245,7 +260,21 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
     flags,
     draftReply: reply ? { body: reply.body, readyBy: reply.readyBy, readyAt: reply.readyAt } : null,
     notes,
+    context: context.map((row) => row.note),
+    related: relatedEmails(emailId, links),
   };
+}
+
+function relatedEmails(
+  emailId: string,
+  links: { emailId: string; relatedEmailId: string; why: string }[],
+): EmailWork["related"] {
+  const related: EmailWork["related"] = [];
+  for (const link of links) {
+    const other = link.emailId === emailId ? link.relatedEmailId : link.emailId;
+    if (!related.some((entry) => entry.emailId === other)) related.push({ emailId: other, why: link.why });
+  }
+  return related;
 }
 
 function swappedFor(line: {

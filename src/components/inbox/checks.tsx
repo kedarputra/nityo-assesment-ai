@@ -17,6 +17,7 @@ const CHECK_NAMES: Record<ReleaseCheck, string> = {
   "credit-hold": "Not on credit hold",
   "credit-limit": "Within the credit limit",
   "ship-to": "One clear ship-to",
+  "single-ship-to": "One delivery in the email",
   "no-flags": "Nothing flagged",
 };
 

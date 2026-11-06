@@ -63,6 +63,8 @@ export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null
         <RoutedCard key={index} request={request} />
       ))}
       {work.flags.length > 0 ? <Flags flags={work.flags} /> : null}
+      {work.related.length > 0 ? <Related related={work.related} /> : null}
+      {work.context.length > 0 ? <AgentNotes notes={work.context} /> : null}
       {work.notes.length > 0 ? <Notes notes={work.notes} /> : null}
       {work.draftReply !== null ? <DraftReplyEditor emailId={email.emailId} reply={work.draftReply} /> : null}
     </div>
@@ -153,6 +155,39 @@ function NoActionCard({ noAction }: { noAction: NoActionView }) {
       ) : null}
       <p className="meta">{noAction.note}</p>
     </article>
+  );
+}
+
+// Shown on both emails of a link, so a reviewer sees the whole story (ticket 08 of the map).
+function Related({ related }: { related: EmailWork["related"] }) {
+  return (
+    <section className="thinks" aria-label="Related emails">
+      <h3 className="who">Related</h3>
+      <ul className="checks">
+        {related.map((link) => (
+          <li key={link.emailId}>
+            <span>
+              Related: <Link href={emailHref(link.emailId)}>{link.emailId}</Link> {link.why}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function AgentNotes({ notes }: { notes: string[] }) {
+  return (
+    <section className="thinks" aria-label="What the agent noted">
+      <h3 className="who">What the agent noted</h3>
+      <ul className="checks">
+        {notes.map((note, index) => (
+          <li key={index}>
+            <span>{note}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
