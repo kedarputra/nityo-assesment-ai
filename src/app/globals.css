@@ -815,6 +815,35 @@ ul.rows {
   gap: var(--s2);
 }
 
+.audit-card {
+  margin-top: var(--s3);
+  overflow-x: auto;
+}
+
+.audit {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.audit th,
+.audit td {
+  text-align: left;
+  padding: var(--s2);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+
+.audit thead th {
+  font: 600 13px/1.3 var(--sans);
+  color: var(--ink-muted);
+}
+
+.audit-detail {
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+}
+
 .audit-empty {
   margin-top: var(--s3);
   display: grid;

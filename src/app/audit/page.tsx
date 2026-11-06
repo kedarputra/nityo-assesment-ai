@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { AuditLog } from "@/components/audit-log";
+import { getDatabase } from "@/db/client";
+import { listAuditEvents } from "@/server/audit/audit-log";
 import { requireUser } from "@/server/auth/current-user";
 
 export const metadata: Metadata = {
@@ -10,5 +12,5 @@ export default async function AuditLogPage() {
   // The proxy already turned away anyone without a session; this is the page's own check.
   await requireUser();
 
-  return <AuditLog />;
+  return <AuditLog events={await listAuditEvents(getDatabase())} />;
 }
