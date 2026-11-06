@@ -1,17 +1,21 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  customerContacts,
-  customerPrices,
-  customers,
-  emails,
-  incomingSupply,
-  inventory,
-  products,
-  salesOrderLines,
-  salesOrders,
-  shipToAddresses,
+import {
+  customerStatus,
+  productStatus,
+  salesOrderStatus,
+  sellUom,
+  type customerContacts,
+  type customerPrices,
+  type customers,
+  type emails,
+  type incomingSupply,
+  type inventory,
+  type products,
+  type salesOrderLines,
+  type salesOrders,
+  type shipToAddresses,
 } from "@/db/schema";
 
 // The Snapshot as typed rows, ready to insert. Reading casts every TEXT value from the pack and
@@ -64,47 +68,46 @@ function readTable(erp: DatabaseSync, table: ErpTable): PackRow[] {
 }
 
 function readErp(erp: DatabaseSync): Omit<Snapshot, "emails"> {
-  const rowsOf = (table: ErpTable) => readTable(erp, table);
   return {
-    customers: rowsOf("customers").map((row) => ({
+    customers: readTable(erp, "customers").map((row) => ({
       customerId: text(row, "customer_id"),
       name: text(row, "name"),
       paymentTerms: text(row, "payment_terms"),
       creditLimitCents: cents(row, "credit_limit"),
       openBalanceCents: cents(row, "open_balance"),
-      status: oneOf(row, "status", ["ACTIVE", "CREDIT_HOLD"] as const),
+      status: oneOf(row, "status", customerStatus.enumValues),
     })),
-    customerContacts: rowsOf("customer_contacts").map((row) => ({
+    customerContacts: readTable(erp, "customer_contacts").map((row) => ({
       customerId: text(row, "customer_id"),
       name: text(row, "name"),
       email: text(row, "email"),
       role: text(row, "role"),
     })),
-    shipToAddresses: rowsOf("ship_to_addresses").map((row) => ({
+    shipToAddresses: readTable(erp, "ship_to_addresses").map((row) => ({
       shipToId: text(row, "ship_to_id"),
       customerId: text(row, "customer_id"),
       name: text(row, "name"),
       address: text(row, "address"),
       isDefault: oneOf(row, "is_default", ["0", "1"] as const) === "1",
     })),
-    products: rowsOf("products").map((row) => ({
+    products: readTable(erp, "products").map((row) => ({
       sku: text(row, "sku"),
       name: text(row, "name"),
       category: text(row, "category"),
-      sellUom: oneOf(row, "sell_uom", ["CS", "EA"] as const),
+      sellUom: oneOf(row, "sell_uom", sellUom.enumValues),
       pack: text(row, "pack"),
       listPriceCents: cents(row, "list_price"),
-      status: oneOf(row, "status", ["ACTIVE", "DISCONTINUED"] as const),
+      status: oneOf(row, "status", productStatus.enumValues),
       replacedBy: optionalText(row, "replaced_by"),
     })),
-    customerPrices: rowsOf("customer_prices").map((row) => ({
+    customerPrices: readTable(erp, "customer_prices").map((row) => ({
       customerId: text(row, "customer_id"),
       sku: text(row, "sku"),
       unitPriceCents: cents(row, "unit_price"),
       validFrom: isoDate(row, "valid_from"),
       validTo: isoDate(row, "valid_to"),
     })),
-    inventory: rowsOf("inventory").map((row) => {
+    inventory: readTable(erp, "inventory").map((row) => {
       const onHand = wholeNumber(row, "on_hand");
       const allocated = wholeNumber(row, "allocated");
       // The database derives `available`; a pack that disagrees with it is refused, not hidden.
@@ -113,22 +116,22 @@ function readErp(erp: DatabaseSync): Omit<Snapshot, "emails"> {
       }
       return { sku: text(row, "sku"), onHand, allocated };
     }),
-    incomingSupply: rowsOf("incoming_supply").map((row) => ({
+    incomingSupply: readTable(erp, "incoming_supply").map((row) => ({
       supplierPo: text(row, "supplier_po"),
       sku: text(row, "sku"),
       qty: wholeNumber(row, "qty"),
       expectedDate: isoDate(row, "expected_date"),
     })),
-    salesOrders: rowsOf("sales_orders").map((row) => ({
+    salesOrders: readTable(erp, "sales_orders").map((row) => ({
       soNumber: text(row, "so_number"),
       customerId: text(row, "customer_id"),
       shipToId: text(row, "ship_to_id"),
       customerPo: optionalText(row, "customer_po"),
       orderDate: isoDate(row, "order_date"),
       requestedDate: isoDate(row, "requested_date"),
-      status: oneOf(row, "status", ["OPEN", "PARTIALLY_SHIPPED", "SHIPPED"] as const),
+      status: oneOf(row, "status", salesOrderStatus.enumValues),
     })),
-    salesOrderLines: rowsOf("sales_order_lines").map((row) => ({
+    salesOrderLines: readTable(erp, "sales_order_lines").map((row) => ({
       soNumber: text(row, "so_number"),
       lineNo: wholeNumber(row, "line_no"),
       sku: text(row, "sku"),
