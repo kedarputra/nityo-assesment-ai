@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
 import {
@@ -6,22 +6,26 @@ import {
   customerContacts,
   customerPrices,
   customers,
-  draftReplies,
   incomingSupply,
   inventory,
   products,
+  proposals,
   salesOrderLines,
   salesOrders,
+  noActionReasons,
+  routeReasons,
   shipToAddresses,
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
+import { closeNoAction, routeToPerson, writeDraftReply } from "./requests";
 import { ToolError } from "./tool-error";
 
 // The agent's tools (security 5): the only way the model touches anything. Read tools read the
-// ERP; action tools write only Proposals, outcomes, flags and Draft replies. A release happens
-// only inside the gate that `propose_new_order` hands the order to, never on the model's say-so.
+// ERP; action tools write only Proposals, routed Requests, outcomes, notes, flags and Draft
+// replies. A release happens only inside the gate that `propose_new_order` hands the order to,
+// never on the model's say-so.
 
 export interface ToolContext {
   runId: string;
@@ -32,21 +36,16 @@ export interface ToolContext {
   now: () => Date;
 }
 
-// What a run learns from its action tools, beyond what they store.
-export interface RunState {
-  closedNoAction: string | null;
-}
-
 interface ToolSpec<Input extends z.ZodType> {
   name: string;
   description: string;
   input: Input;
-  run(tx: Database, context: ToolContext, input: z.infer<Input>, state: RunState): Promise<unknown>;
+  run(tx: Database, context: ToolContext, input: z.infer<Input>): Promise<unknown>;
 }
 
 // A call whose arguments passed the tool's schema, ready to run; or why they did not.
 export type ValidatedCall =
-  | { valid: true; run: (tx: Database, context: ToolContext, state: RunState) => Promise<unknown> }
+  | { valid: true; run: (tx: Database, context: ToolContext) => Promise<unknown> }
   | { valid: false; problems: string };
 
 export interface AgentTool {
@@ -65,13 +64,14 @@ function tool<Input extends z.ZodType>(spec: ToolSpec<Input>): AgentTool {
     validate(args) {
       const parsed = spec.input.safeParse(args);
       if (!parsed.success) return { valid: false, problems: z.prettifyError(parsed.error) };
-      return { valid: true, run: (tx, context, state) => spec.run(tx, context, parsed.data, state) };
+      return { valid: true, run: (tx, context) => spec.run(tx, context, parsed.data) };
     },
   };
 }
 
 const customerId = z.string().min(1).max(20).describe("A customer id, e.g. C001.");
 const sku = z.string().min(1).max(20).describe("A SKU, e.g. HPS-1408.");
+const emailId = z.string().regex(/^E\d{3}$/).describe("An email id, e.g. E015.");
 const quantity = z.number().int().positive().max(100_000).describe("Whole selling units.");
 
 const findCustomer = tool({
@@ -167,14 +167,16 @@ const checkCredit = tool({
 
 const getOrders = tool({
   name: "get_orders",
-  description: "A customer's sales orders with their lines, newest first; optionally only those with a given customer PO.",
+  description:
+    "A customer's sales orders with their lines, newest first; optionally only those with a given customer PO. An order released from an email today names that email in fromEmailId.",
   input: z.strictObject({ customer_id: customerId, customer_po: z.string().min(1).max(60).optional() }),
   async run(tx, _context, input) {
     const conditions = [eq(salesOrders.customerId, input.customer_id)];
     if (input.customer_po) conditions.push(eq(salesOrders.customerPo, input.customer_po));
     const orders = await tx
-      .select()
+      .select({ ...getTableColumns(salesOrders), fromEmailId: proposals.emailId })
       .from(salesOrders)
+      .leftJoin(proposals, eq(proposals.soNumber, salesOrders.soNumber))
       .where(and(...conditions))
       .orderBy(desc(salesOrders.orderDate), desc(salesOrders.soNumber))
       .limit(10);
@@ -258,14 +260,10 @@ const proposeNewOrderTool = tool({
 const draftReply = tool({
   name: "draft_reply",
   description:
-    "Write the reply to the customer, in their language, for a person to approve. It is never sent by the system. Call it once, after the order's outcome is known.",
+    "Write the reply to the customer, in their language, for a person to approve. It is never sent by the system. An email has one Draft reply: call it once, after the outcome is known, unless route_to_person already wrote it.",
   input: z.strictObject({ body: z.string().min(1).max(5000) }),
   async run(tx, context, input) {
-    const [reply] = await tx
-      .insert(draftReplies)
-      .values({ runId: context.runId, emailId: context.emailId, body: input.body })
-      .returning({ id: draftReplies.id });
-    return { draftReplyId: reply?.id };
+    return { draftReplyId: await writeDraftReply(tx, context, input.body) };
   },
 });
 
@@ -286,13 +284,36 @@ const raiseFlag = tool({
   },
 });
 
-const closeNoAction = tool({
+const routeToPersonTool = tool({
+  name: "route_to_person",
+  description:
+    "Send a Request the ERP cannot act on to a person, with a summary for them and the Draft reply to the customer. Reasons: quote (a quote request), return, billing (a billing dispute), inquiry (a question about an order), prospect (a company that is not a customer), no-quantities (an order that names no quantities; never invent them), missing-attachment (an order whose attachment is not there; ask for it again). It changes nothing in the ERP. An email that also has an order calls this beside propose_new_order.",
+  input: z.strictObject({
+    reason: z.enum(routeReasons),
+    summary: z.string().min(1).max(1000).describe("What the person needs to know and decide, in plain words."),
+    reply: z
+      .string()
+      .min(1)
+      .max(5000)
+      .optional()
+      .describe("The email's one Draft reply, covering everything it asks. Leave out only if draft_reply already wrote it."),
+  }),
+  async run(tx, context, input) {
+    return routeToPerson(tx, context, { reason: input.reason, summary: input.summary, reply: input.reply ?? null });
+  },
+});
+
+const closeNoActionTool = tool({
   name: "close_no_action",
-  description: "Close an email that needs nothing from Harbor Point (spam, an auto-reply, a duplicate), with the reason.",
-  input: z.strictObject({ reason: z.string().min(1).max(500) }),
-  async run(_tx, _context, input, state) {
-    state.closedNoAction = input.reason;
-    return { closed: true };
+  description:
+    "Close an email that needs nothing from Harbor Point: spam, an auto-reply, or a duplicate of an earlier email whose order is already in the system (the same customer PO, or every line the same). A duplicate names the earlier email. An auto-reply's note is attached to the sender's open Requests, so write in it what a person should know (who is away until when, whom to call). No Draft reply.",
+  input: z.strictObject({
+    reason: z.enum(noActionReasons),
+    note: z.string().min(1).max(500).describe("Why, in a sentence; for an auto-reply, what it tells us."),
+    duplicate_of: emailId.optional().describe("For a duplicate: the earlier email it repeats."),
+  }),
+  async run(tx, context, input) {
+    return closeNoAction(tx, context, { reason: input.reason, note: input.note, duplicateOf: input.duplicate_of ?? null });
   },
 });
 
@@ -307,7 +328,8 @@ export const agentTools: readonly AgentTool[] = [
   proposeNewOrderTool,
   draftReply,
   raiseFlag,
-  closeNoAction,
+  routeToPersonTool,
+  closeNoActionTool,
 ];
 
 export function findTool(name: string): AgentTool | undefined {

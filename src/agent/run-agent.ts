@@ -1,14 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { Database } from "@/db/database";
-import { agentFlags, agentRuns, emails, proposals, type AgentRunOutcome, type GateVerdict, type ProposalStatus } from "@/db/schema";
+import {
+  agentRuns,
+  emails,
+  proposals,
+  requestKinds,
+  routedRequests,
+  type AgentRunOutcome,
+  type GateVerdict,
+  type ProposalStatus,
+  type RequestKind,
+} from "@/db/schema";
 import { businessDateOf } from "@/lib/business-clock";
 import { toolCallsIn, type Model, type ModelMessage, type ModelResponse, type ToolCall, type ToolResult } from "@/model/model";
 import { BusinessRuleError } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
 import { emailMessage, SYSTEM_PROMPT } from "./prompt";
 import { ToolError } from "./tool-error";
-import { findTool, toolDefinitions, type RunState, type ToolContext } from "./tools";
+import { findTool, toolDefinitions, type ToolContext } from "./tools";
 
 // One Agent run: a tool-use loop over one Email (the agent's shape). Security 5 bounds it: at
 // most 15 model calls, and every tool result capped in size.
@@ -88,7 +98,6 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
     orderDate: businessDateOf(email.receivedAt),
     now,
   };
-  const state: RunState = { closedNoAction: null };
   const usage: Usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0 };
   const tools = toolDefinitions();
   const messages: ModelMessage[] = [{ role: "user", content: [{ type: "text", text: emailMessage(email) }] }];
@@ -110,7 +119,7 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
         break;
       }
       const results: ToolResult[] = [];
-      for (const call of calls) results.push(await callTool(db, context, state, call));
+      for (const call of calls) results.push(await callTool(db, context, call));
       messages.push({ role: "user", content: results });
     }
   } catch (error) {
@@ -118,7 +127,7 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
     errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
   }
 
-  return finishRun(db, { context, state, usage, errorClass, modelId: options.modelId });
+  return finishRun(db, { context, usage, errorClass, modelId: options.modelId });
 }
 
 function countUsage(usage: Usage, response: ModelResponse): void {
@@ -140,7 +149,7 @@ function stopErrorClass(response: ModelResponse): string | null {
 
 // Each tool call runs in its own transaction with its audit event. A call that fails its schema
 // or the tool's own checks writes nothing but the audit event, and the model gets the error.
-async function callTool(db: Database, context: ToolContext, state: RunState, call: ToolCall): Promise<ToolResult> {
+async function callTool(db: Database, context: ToolContext, call: ToolCall): Promise<ToolResult> {
   const audit = (tx: Database, action: string, detail: Record<string, unknown>) =>
     recordAudit(tx, {
       at: context.now(),
@@ -162,7 +171,7 @@ async function callTool(db: Database, context: ToolContext, state: RunState, cal
 
   try {
     const content = await db.transaction(async (tx) => {
-      const result = await validated.run(tx, context, state);
+      const result = await validated.run(tx, context);
       const capped = capResult(JSON.stringify(result));
       await audit(tx, "tool.called", { result: capped });
       return capped;
@@ -181,21 +190,34 @@ function capResult(content: string): string {
 
 interface Finish {
   context: ToolContext;
-  state: RunState;
   usage: Usage;
   errorClass: string | null;
   modelId: string;
 }
 
-async function finishRun(db: Database, { context, state, usage, errorClass, modelId }: Finish): Promise<AgentRunSummary> {
+async function finishRun(db: Database, { context, usage, errorClass, modelId }: Finish): Promise<AgentRunSummary> {
   return db.transaction(async (tx) => {
     const proposed = await tx.select({ status: proposals.status }).from(proposals).where(eq(proposals.runId, context.runId));
-    const flags = await tx.select({ id: agentFlags.id }).from(agentFlags).where(eq(agentFlags.runId, context.runId));
+    const routed = await tx
+      .select({ kind: routedRequests.kind })
+      .from(routedRequests)
+      .where(eq(routedRequests.runId, context.runId));
+    const [run] = await tx
+      .select({ noActionReason: agentRuns.noActionReason })
+      .from(agentRuns)
+      .where(eq(agentRuns.runId, context.runId));
+    const closedNoAction = run?.noActionReason != null;
     const gateVerdict = gateVerdictOf(proposed.map((proposal) => proposal.status));
-    const settled = outcomeOf({ gateVerdict, flagged: flags.length > 0, closedNoAction: state.closedNoAction !== null });
+    const settled = outcomeOf({ gateVerdict, routed: routed.length > 0, closedNoAction });
     // A run that ends without an outcome is a failure a person sees, never a quiet "done".
     const finalErrorClass = errorClass ?? (settled === null ? "no-outcome" : null);
     const outcome: AgentRunOutcome = finalErrorClass === null && settled !== null ? settled : "failed";
+    // Every Proposal so far is a new order; order changes and cancellations add their own kinds.
+    const kinds = requestKindsOf([
+      ...(proposed.length > 0 ? (["new order"] as const) : []),
+      ...routed.map((request) => request.kind),
+      ...(closedNoAction ? (["no action"] as const) : []),
+    ]);
 
     const endedAt = context.now();
     const prices = PRICES_PER_MILLION_TOKENS[modelId] ?? DEFAULT_PRICES;
@@ -203,7 +225,7 @@ async function finishRun(db: Database, { context, state, usage, errorClass, mode
     const estimatedCostMicroUsd = usage.inputTokens * prices.input + usage.outputTokens * prices.output;
     await tx
       .update(agentRuns)
-      .set({ endedAt, ...usage, estimatedCostMicroUsd, outcome, gateVerdict, errorClass: finalErrorClass })
+      .set({ endedAt, ...usage, estimatedCostMicroUsd, outcome, gateVerdict, errorClass: finalErrorClass, requestKinds: kinds })
       .where(eq(agentRuns.runId, context.runId));
     await recordAudit(tx, {
       at: endedAt,
@@ -215,7 +237,8 @@ async function finishRun(db: Database, { context, state, usage, errorClass, mode
         outcome,
         gateVerdict,
         errorClass: finalErrorClass,
-        noActionReason: state.closedNoAction,
+        requestKinds: kinds,
+        noActionReason: run?.noActionReason ?? null,
         ...usage,
         estimatedCostMicroUsd,
       },
@@ -231,10 +254,16 @@ function gateVerdictOf(statuses: ProposalStatus[]): GateVerdict | null {
   return null;
 }
 
-function outcomeOf(run: { gateVerdict: GateVerdict | null; flagged: boolean; closedNoAction: boolean }): AgentRunOutcome | null {
+// A routed Request needs a person even beside a released order, so it outranks the release.
+function outcomeOf(run: { gateVerdict: GateVerdict | null; routed: boolean; closedNoAction: boolean }): AgentRunOutcome | null {
   if (run.gateVerdict === "review") return "proposal";
+  if (run.routed) return "routed";
   if (run.gateVerdict === "released") return "released";
-  if (run.flagged) return "routed";
   if (run.closedNoAction) return "no_action";
   return null;
+}
+
+// Each kind once, in CONTEXT.md's order.
+function requestKindsOf(found: RequestKind[]): RequestKind[] {
+  return requestKinds.filter((kind) => found.includes(kind));
 }

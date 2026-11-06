@@ -152,6 +152,7 @@ describe("an Agent run", () => {
       "propose_new_order",
       "draft_reply",
       "raise_flag",
+      "route_to_person",
       "close_no_action",
     ]);
     expect(first?.tools.every((tool) => tool.inputSchema.type === "object")).toBe(true);
