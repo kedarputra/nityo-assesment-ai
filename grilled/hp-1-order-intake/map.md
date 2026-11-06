@@ -22,6 +22,8 @@ decisions and assumptions fall out of this map.
 - Ground every question in an email id, an ERP row, or the brief's or README's own words.
 - Ask the developer one question at a time, through the question tool (`AGENTS.md`).
 - The data pack is read-only; a fix to bad data is an ingest decision and a product-brief assumption.
+- Every screen follows [`DESIGN.md`](../../DESIGN.md); its living example is Variant A of
+  [the review UI prototype](assets/prototype-review-ui.html).
 
 ## Decisions so far
 
@@ -51,6 +53,9 @@ decisions and assumptions fall out of this map.
 - [Vercel and Neon limits for agent runs](issues/04-vercel-neon-agent-run-limits.md): one email fits
   in a function budget but 40 don't; Workflows is the only built-in option that keeps order; use
   `pg` with a pool on Neon; three ways to reset; cap spend on a dedicated Anthropic workspace.
+- [What the ops review UI looks like](issues/02-review-ui-prototype.md): a three-pane inbox (list,
+  email with the agent's reasoning, Proposal) with blockers first and a one-line headline; no bulk
+  approval; quantity, SKU, lines and ship-to are editable, price and customer are not.
 
 ## Not yet specified
 
