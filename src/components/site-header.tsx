@@ -1,5 +1,5 @@
 import type { SessionUser } from "@/server/auth/sessions";
-import { signOutAction } from "@/server/auth/actions";
+import { AccountMenu } from "./account-menu";
 import { HeaderNav } from "./header-nav";
 
 export const MAIN_CONTENT_ID = "main";
@@ -12,7 +12,8 @@ export function SkipLink() {
   );
 }
 
-export function SiteHeader({ user }: { user: SessionUser | null }) {
+// `runGoing`: whether an Inbox run or an Agent run holds the lock, so an admin's menu offers Stop.
+export function SiteHeader({ user, runGoing = false }: { user: SessionUser | null; runGoing?: boolean }) {
   return (
     <header className="top">
       <span className="wordmark" translate="no">
@@ -21,12 +22,7 @@ export function SiteHeader({ user }: { user: SessionUser | null }) {
       {user ? <HeaderNav /> : null}
       {user ? (
         <span className="right">
-          <span className="meta hide-phone">{user.username}</span>
-          <form action={signOutAction}>
-            <button type="submit" className="btn btn--ghost">
-              Sign out
-            </button>
-          </form>
+          <AccountMenu username={user.username} isAdmin={user.role === "admin"} runGoing={runGoing} />
         </span>
       ) : null}
     </header>

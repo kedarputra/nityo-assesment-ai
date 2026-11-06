@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { recordAudit } from "@/agent/audit";
-import { isReading, runAgent, SPEND_LIMIT_ERROR_CLASS, type AgentRunSummary } from "@/agent/run-agent";
+import { isReading, runAgent, type AgentRunSummary } from "@/agent/run-agent";
+import { SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
 import type { Database } from "@/db/database";
 import { agentRuns, inboxRuns, type InboxRunEndReason } from "@/db/schema";
 import type { Model } from "@/model/model";

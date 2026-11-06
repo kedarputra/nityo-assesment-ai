@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "@/db/database";
-import { auditEvents, inventory, users } from "@/db/schema";
+import { agentRuns, auditEvents, inboxRuns, inventory, users } from "@/db/schema";
 import type { ModelRequest } from "@/model/model";
 import { ScriptedModel } from "@/model/scripted-model";
 import { SESSION_COOKIE } from "@/server/auth/gate";
@@ -10,7 +10,15 @@ import { hashPassword } from "@/server/auth/password";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e001Script } from "@/test/e001-script";
-import { dismissTipAction, runAgentAction } from "./actions";
+import {
+  dismissTipAction,
+  finishInboxRunAction,
+  resetToSnapshotAction,
+  runAgentAction,
+  runInboxEmailAction,
+  startInboxRunAction,
+  stopInboxRunAction,
+} from "./actions";
 import { findEmailWork } from "./email-work";
 import { findInboxEmail, isTipDismissed } from "./inbox";
 
@@ -26,7 +34,11 @@ vi.mock("next/headers", () => ({
   }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/db/client", () => ({ getDatabase: () => database }));
+// The Reset's owner connection is the same test database here.
+vi.mock("@/db/client", () => ({
+  getDatabase: () => database,
+  withOwnerDatabase: (work: (db: Database) => Promise<unknown>) => work(database),
+}));
 // The action builds the real model; here it gets the scripted fake, so no test calls the API.
 vi.mock("@/model/anthropic-model", () => ({
   AnthropicModel: class {
@@ -137,5 +149,64 @@ describe("runAgentAction", () => {
   it("does nothing for someone who is not signed in", async () => {
     await expect(runAgentAction("E001")).rejects.toThrow();
     expect(await findEmailWork(database, "E001")).toBeNull();
+  });
+});
+
+describe("the admin's controls", () => {
+  let testDatabase: TestDatabase;
+
+  beforeEach(async () => {
+    testDatabase = await createTestDatabase();
+    database = testDatabase.db;
+    await ingestSnapshot(database);
+  });
+
+  afterEach(async () => {
+    cookieJar.clear();
+    await testDatabase.close();
+  });
+
+  it("refuses a reviewer every admin action, and changes nothing", async () => {
+    await signInAs("reviewer");
+
+    await expect(startInboxRunAction()).rejects.toThrow(/admin/);
+    await expect(runInboxEmailAction({ inboxRunId: 1, emailId: "E001" })).rejects.toThrow(/admin/);
+    await expect(stopInboxRunAction()).rejects.toThrow(/admin/);
+    await expect(finishInboxRunAction(1)).rejects.toThrow(/admin/);
+    await expect(resetToSnapshotAction({ confirmed: true })).rejects.toThrow(/admin/);
+
+    expect(await database.$count(inboxRuns)).toBe(0);
+    expect(await database.$count(agentRuns)).toBe(0);
+    expect(await database.$count(auditEvents)).toBe(0);
+  });
+
+  it("runs the inbox one email at a time for an admin, and refuses a second Run all", async () => {
+    await signInAs("admin");
+
+    const started = await startInboxRunAction();
+    if (!started.ok) throw new Error(started.message);
+    expect(started.plan.emails[0]).toEqual({ emailId: "E001", position: 1 });
+    expect(await runInboxEmailAction({ inboxRunId: started.plan.inboxRunId, emailId: "E001" })).toEqual({ ok: true, outcome: "done" });
+
+    expect(await startInboxRunAction()).toEqual({ ok: false, message: "Run all is already going. Let it finish, or stop it first." });
+  });
+
+  it("refuses a reset while a run holds the lock, with the words from the decision", async () => {
+    await signInAs("admin");
+    await startInboxRunAction();
+
+    expect(await resetToSnapshotAction({ confirmed: true })).toEqual({ ok: false, message: "A run is in progress. Stop it first." });
+
+    await stopInboxRunAction();
+    expect(await resetToSnapshotAction({ confirmed: true })).toEqual({ ok: true });
+    const [first] = await database.select().from(auditEvents);
+    expect(first).toMatchObject({ action: "snapshot.reset", detail: { by: "ops.admin" } });
+  });
+
+  it("does not reset without the confirmation", async () => {
+    await signInAs("admin");
+
+    expect(await resetToSnapshotAction({})).toMatchObject({ ok: false });
+    expect(await database.$count(auditEvents)).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
+import { SPEND_LIMIT_ERROR_CLASS, TIMED_OUT_ERROR_CLASSES } from "@/agent/run-errors";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
 import type { EmailWork, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
@@ -95,20 +96,35 @@ function StillReading() {
   );
 }
 
+// A failed run can run again: "Run the agent" withdraws its undecided Proposals and starts afresh.
 function RunDidNotFinish({ email, errorClass }: { email: InboxEmailWithBody; errorClass: string | null }) {
   return (
     <div className="pane-empty">
       <StatusPill status={email.status} />
       <div className="card card--bad">
-        <h2 className="headline">The agent didn’t finish this email</h2>
-        <p>
-          Nothing it couldn’t finish was released. Its steps so far are in the audit log; read the email and handle it
-          yourself for now.
-        </p>
+        <h2 className="headline">{didNotFinishHeadline(errorClass)}</h2>
+        <p>{didNotFinishNextStep(errorClass)}</p>
         {errorClass ? <p className="meta id">{errorClass}</p> : null}
       </div>
+      <RunAgentButton emailId={email.emailId} />
     </div>
   );
+}
+
+function didNotFinishHeadline(errorClass: string | null): string {
+  if (errorClass !== null && TIMED_OUT_ERROR_CLASSES.includes(errorClass)) return "The agent timed out on this email";
+  if (errorClass === SPEND_LIMIT_ERROR_CLASS) return "The model’s spending limit is reached, so runs are paused";
+  return "The agent didn’t finish this email";
+}
+
+function didNotFinishNextStep(errorClass: string | null): string {
+  if (errorClass !== null && TIMED_OUT_ERROR_CLASSES.includes(errorClass)) {
+    return "Nothing it couldn’t finish was released. Run it again: it starts afresh, and its steps so far are in the audit log.";
+  }
+  if (errorClass === SPEND_LIMIT_ERROR_CLASS) {
+    return "Nothing it couldn’t finish was released. Ask an admin to raise the limit, then run it again.";
+  }
+  return "Nothing it couldn’t finish was released. Its steps so far are in the audit log; run it again, or read the email and handle it yourself.";
 }
 
 function emailHref(emailId: string): string {

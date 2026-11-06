@@ -18,6 +18,7 @@ import { SpendLimitReached, toolCallsIn, type Model, type ModelMessage, type Mod
 import { BusinessRuleError } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
 import { lockReleases } from "./release-gate";
+import { SPEND_LIMIT_ERROR_CLASS } from "./run-errors";
 import { emailMessage, SYSTEM_PROMPT } from "./prompt";
 import { ToolError } from "./tool-error";
 import { findTool, toolDefinitions, type ToolContext } from "./tools";
@@ -34,10 +35,6 @@ export const DEADLINE_MARGIN_MS = 60_000;
 // A run that has not finished this long after it started was cut off with its function, so it no
 // longer holds its email or blocks a Reset.
 export const RUN_ABANDONED_AFTER_MS = 360_000;
-
-// How a run that stopped at its own limits ends: "timed out, run it again".
-export const TIMED_OUT_ERROR_CLASSES: readonly string[] = ["deadline", "call-cap"];
-export const SPEND_LIMIT_ERROR_CLASS = "spend-limit";
 
 // Dollars per million tokens, in and out; the run record's cost is an estimate from these.
 const PRICES_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {

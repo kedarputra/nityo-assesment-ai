@@ -11,6 +11,7 @@ import {
   inboxFilters,
   isHandled,
 } from "@/server/inbox/inbox";
+import { InboxRunProgress } from "@/components/inbox-run";
 import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
 import { ProposalPane } from "./proposal-pane";
@@ -102,6 +103,7 @@ function GreetingCard({ emails }: { emails: InboxEmail[] }) {
       <p className="meta">
         {handled} of {total} handled
       </p>
+      <InboxRunProgress />
     </div>
   );
 }

@@ -3,7 +3,8 @@
 import { getDeadline } from "@vercel/functions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { AgentRunRefused, runAgent, SPEND_LIMIT_ERROR_CLASS, TIMED_OUT_ERROR_CLASSES, type AgentRunSummary } from "@/agent/run-agent";
+import { AgentRunRefused, runAgent, type AgentRunSummary } from "@/agent/run-agent";
+import { SPEND_LIMIT_ERROR_CLASS, TIMED_OUT_ERROR_CLASSES } from "@/agent/run-errors";
 import { getDatabase, withOwnerDatabase } from "@/db/client";
 import { AnthropicModel, modelIdFromEnv } from "@/model/anthropic-model";
 import { requireRole } from "@/server/auth/current-user";
