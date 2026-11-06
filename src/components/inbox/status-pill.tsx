@@ -8,6 +8,9 @@ const STATUS_PILLS: Record<InboxStatus, { icon: string; words: string }> = {
   needs_you: { icon: "!", words: "Needs you" },
   no_action: { icon: "–", words: "No action needed" },
   failed: { icon: "!", words: "Didn’t finish" },
+  approved: { icon: "✓", words: "Approved" },
+  rejected: { icon: "✕", words: "Rejected" },
+  on_hold: { icon: "◐", words: "On hold" },
 };
 
 export function StatusPill({ status }: { status: InboxStatus }) {

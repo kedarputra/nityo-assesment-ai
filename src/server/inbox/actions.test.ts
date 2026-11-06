@@ -112,7 +112,7 @@ describe("runAgentAction", () => {
       ["HPS-1402", 6, 42600],
       ["HPS-1502", 2, 6600],
     ]);
-    expect(work?.draftReply).toContain("SO-24059");
+    expect(work?.draftReply?.body).toContain("SO-24059");
     const [stock] = await database.select().from(inventory).where(eq(inventory.sku, "HPS-1408"));
     expect(stock?.available).toBe(26);
     const [started] = await database.select().from(auditEvents).where(eq(auditEvents.action, "run.started"));
