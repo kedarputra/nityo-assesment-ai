@@ -48,12 +48,12 @@ decisions and assumptions fall out of this map.
   every approval re-runs the checks; soft checks can be overridden with a reason, hard rules cannot.
 - [Charting: the agent's shape](issues/01-charting-decisions.md#the-agents-shape): one tool-use run
   per email, read and action tools, Opus 5.5, and an append-only audit log.
+- [Vercel and Neon limits for agent runs](issues/04-vercel-neon-agent-run-limits.md): one email fits
+  in a function budget but 40 don't; Workflows is the only built-in option that keeps order; use
+  `pg` with a pool on Neon; three ways to reset; cap spend on a dedicated Anthropic workspace.
 
 ## Not yet specified
 
-- **Orchestrating a whole-inbox run.** How "run all 40 in order" is driven from the UI (a client
-  loop, a queue, a workflow) and how the reset works. Waits on
-  [Vercel and Neon limits for agent runs](issues/04-vercel-neon-agent-run-limits.md).
 - **New case policies.** Whatever the
   [walkthrough of the 40 emails](issues/03-per-email-walkthrough.md) finds that no policy covers.
 - **The eval script and its metrics.** How a live run over the 40 emails is scored against the
@@ -62,8 +62,6 @@ decisions and assumptions fall out of this map.
 - **Production success metrics** for the product brief (brief item 1, "how you would measure success
   in production"): what gets measured, such as the share released untouched, edit rate on Proposals,
   time to order and gate misses.
-- **Preview-deploy data.** Whether each preview deploy gets its own seeded database. Shaped by the
-  research ticket.
 
 ## Out of scope
 
