@@ -4,7 +4,7 @@ import { getDeadline } from "@vercel/functions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentRunRefused, runAgent, type AgentRunSummary } from "@/agent/run-agent";
-import { SPEND_LIMIT_ERROR_CLASS, TIMED_OUT_ERROR_CLASSES } from "@/agent/run-errors";
+import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
 import { getDatabase, withOwnerDatabase } from "@/db/client";
 import { AnthropicModel, modelIdFromEnv } from "@/model/anthropic-model";
 import { requireRole } from "@/server/auth/current-user";
@@ -114,7 +114,7 @@ export async function runInboxEmailAction(input: unknown): Promise<InboxRunStepR
 
 function stepResult(summary: AgentRunSummary): InboxRunStepResult {
   if (summary.errorClass === SPEND_LIMIT_ERROR_CLASS) return { ok: false, stop: true, message: SPEND_LIMIT_MESSAGE };
-  if (summary.errorClass !== null && TIMED_OUT_ERROR_CLASSES.includes(summary.errorClass)) return { ok: true, outcome: "timed-out" };
+  if (isTimedOut(summary.errorClass)) return { ok: true, outcome: "timed-out" };
   if (summary.outcome === "failed") return { ok: true, outcome: "failed" };
   return { ok: true, outcome: "done" };
 }

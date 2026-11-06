@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
-import { SPEND_LIMIT_ERROR_CLASS, TIMED_OUT_ERROR_CLASSES } from "@/agent/run-errors";
+import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
 import type { EmailWork, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
@@ -112,13 +112,13 @@ function RunDidNotFinish({ email, errorClass }: { email: InboxEmailWithBody; err
 }
 
 function didNotFinishHeadline(errorClass: string | null): string {
-  if (errorClass !== null && TIMED_OUT_ERROR_CLASSES.includes(errorClass)) return "The agent timed out on this email";
+  if (isTimedOut(errorClass)) return "The agent timed out on this email";
   if (errorClass === SPEND_LIMIT_ERROR_CLASS) return "The model’s spending limit is reached, so runs are paused";
   return "The agent didn’t finish this email";
 }
 
 function didNotFinishNextStep(errorClass: string | null): string {
-  if (errorClass !== null && TIMED_OUT_ERROR_CLASSES.includes(errorClass)) {
+  if (isTimedOut(errorClass)) {
     return "Nothing it couldn’t finish was released. Run it again: it starts afresh, and its steps so far are in the audit log.";
   }
   if (errorClass === SPEND_LIMIT_ERROR_CLASS) {
