@@ -334,10 +334,7 @@ export async function checkChange(tx: Database, change: ChangeToCheck): Promise<
       codesInEmail: skuCodesIn(email?.body ?? ""),
       searches: await citedSearches(tx, priced),
     }),
-    "credit-hold":
-      increaseCents === 0 || credit.status.passes
-        ? { passes: true, detail: increaseCents === 0 ? "The change adds nothing to the order's value." : "The customer is not on credit hold." }
-        : { passes: false, detail: "The customer is on CREDIT_HOLD, and the change adds to the order." },
+    "credit-hold": creditHoldResult(increaseCents, credit),
     "credit-limit": creditLimitResult(increaseCents, credit),
     "no-flags":
       flags.length === 0
@@ -415,6 +412,12 @@ function lineResults(
     "full-stock":
       increases.length === 0 ? { passes: true, detail: "The change takes no more stock." } : stockResult(increases, null),
   };
+}
+
+function creditHoldResult(increaseCents: number, credit: ReturnType<typeof creditCheck>): Omit<RecordedCheck, "check"> {
+  if (increaseCents === 0) return { passes: true, detail: "The change adds nothing to the order's value." };
+  if (credit.status.passes) return { passes: true, detail: "The customer is not on credit hold." };
+  return { passes: false, detail: "The customer is on CREDIT_HOLD, and the change adds to the order." };
 }
 
 function creditLimitResult(increaseCents: number, credit: ReturnType<typeof creditCheck>): Omit<RecordedCheck, "check"> {
