@@ -1,0 +1,495 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
+
+// The app's own settings, one value per key.
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// The ERP and the inbox as the data pack delivers them. The pack stores every column as TEXT;
+// here money is integer cents, dates are dates, quantities are integers and statuses are the
+// pack's own values, constrained. Column names follow the pack, with `_cents` on money.
+
+export const customerStatus = pgEnum("customer_status", ["ACTIVE", "CREDIT_HOLD"]);
+export const sellUom = pgEnum("sell_uom", ["CS", "EA"]);
+export const productStatus = pgEnum("product_status", ["ACTIVE", "DISCONTINUED"]);
+// `CANCELLED` is not in the pack: it is what an approved cancellation leaves, so the order and
+// its lines stay on record instead of being deleted.
+export const salesOrderStatus = pgEnum("sales_order_status", [
+  "OPEN",
+  "PARTIALLY_SHIPPED",
+  "SHIPPED",
+  "CANCELLED",
+]);
+
+export const customers = pgTable("customers", {
+  customerId: text("customer_id").primaryKey(),
+  name: text("name").notNull(),
+  paymentTerms: text("payment_terms").notNull(),
+  creditLimitCents: integer("credit_limit_cents").notNull(),
+  openBalanceCents: integer("open_balance_cents").notNull(),
+  status: customerStatus("status").notNull(),
+});
+
+// The pack gives contacts no id of their own.
+export const customerContacts = pgTable("customer_contacts", {
+  id: serial("id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+});
+
+export const shipToAddresses = pgTable("ship_to_addresses", {
+  shipToId: text("ship_to_id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  name: text("name").notNull(),
+  address: text("address").notNull(),
+  isDefault: boolean("is_default").notNull(),
+});
+
+export const products = pgTable("products", {
+  sku: text("sku").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  sellUom: sellUom("sell_uom").notNull(),
+  pack: text("pack").notNull(),
+  listPriceCents: integer("list_price_cents").notNull(),
+  status: productStatus("status").notNull(),
+  replacedBy: text("replaced_by").references((): AnyPgColumn => products.sku),
+});
+
+export const customerPrices = pgTable("customer_prices", {
+  id: serial("id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  sku: text("sku")
+    .notNull()
+    .references(() => products.sku),
+  unitPriceCents: integer("unit_price_cents").notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to").notNull(),
+});
+
+// `available` is derived by the database, so it cannot drift from on_hand and allocated.
+export const inventory = pgTable("inventory", {
+  sku: text("sku")
+    .primaryKey()
+    .references(() => products.sku),
+  onHand: integer("on_hand").notNull(),
+  allocated: integer("allocated").notNull(),
+  available: integer("available")
+    .notNull()
+    .generatedAlwaysAs(sql`on_hand - allocated`),
+});
+
+export const incomingSupply = pgTable("incoming_supply", {
+  id: serial("id").primaryKey(),
+  supplierPo: text("supplier_po").notNull(),
+  sku: text("sku")
+    .notNull()
+    .references(() => products.sku),
+  qty: integer("qty").notNull(),
+  expectedDate: date("expected_date").notNull(),
+});
+
+export const salesOrders = pgTable("sales_orders", {
+  soNumber: text("so_number").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  shipToId: text("ship_to_id")
+    .notNull()
+    .references(() => shipToAddresses.shipToId),
+  customerPo: text("customer_po"),
+  orderDate: date("order_date").notNull(),
+  requestedDate: date("requested_date").notNull(),
+  status: salesOrderStatus("status").notNull(),
+});
+
+export const salesOrderLines = pgTable(
+  "sales_order_lines",
+  {
+    soNumber: text("so_number")
+      .notNull()
+      .references(() => salesOrders.soNumber),
+    lineNo: integer("line_no").notNull(),
+    sku: text("sku")
+      .notNull()
+      .references(() => products.sku),
+    qtyOrdered: integer("qty_ordered").notNull(),
+    qtyShipped: integer("qty_shipped").notNull(),
+    unitPriceCents: integer("unit_price_cents").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.soNumber, table.lineNo] })],
+);
+
+// No email in the pack has an attachment, so there is no column for them; the ingest refuses
+// an email that has one rather than drop it.
+export const emails = pgTable("emails", {
+  emailId: text("email_id").primaryKey(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  fromName: text("from_name").notNull(),
+  fromEmail: text("from_email").notNull(),
+  to: text("to").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+});
+
+// A person who signs in (security 1 and 2). Seeded from env vars, never signed up; the hash is
+// argon2id, and no plain password is ever stored.
+export const userRoles = ["reviewer", "admin"] as const;
+export type UserRole = (typeof userRoles)[number];
+
+export const users = pgTable(
+  "users",
+  {
+    id: serial("id").primaryKey(),
+    username: text("username").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    role: text("role", { enum: userRoles }).notNull(),
+    // When the person dismissed the inbox's tip card; it stays dismissed on every device.
+    tipDismissedAt: timestamp("tip_dismissed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check("users_role_check", sql`${table.role} in ('reviewer', 'admin')`)],
+);
+
+// A signed-in browser. The cookie carries a random token; only its SHA-256 is stored, so a
+// read of this table cannot be replayed as a session.
+export const sessions = pgTable(
+  "sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("sessions_user_id_idx").on(table.userId)],
+);
+
+// Failed sign-ins per typed username, known or not, so a lock reveals nothing about which
+// accounts exist. Five failures inside one 15-minute window lock the name for 15 minutes.
+export const signInThrottle = pgTable("sign_in_throttle", {
+  username: text("username").primaryKey(),
+  failureCount: integer("failure_count").notNull(),
+  windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+});
+
+// ---- The agent's work -----------------------------------------------------------------------------
+
+// `routed`: the agent sent a Request to a person with a summary, without proposing an ERP change.
+export const agentRunOutcomes = ["released", "proposal", "routed", "no_action", "failed"] as const;
+export type AgentRunOutcome = (typeof agentRunOutcomes)[number];
+
+export const gateVerdicts = ["released", "review"] as const;
+export type GateVerdict = (typeof gateVerdicts)[number];
+
+// The categories of a Request (CONTEXT.md), in the order the desk lists them.
+export const requestKinds = [
+  "new order",
+  "order change",
+  "cancellation",
+  "return",
+  "billing dispute",
+  "quote request",
+  "order inquiry",
+  "no action",
+] as const;
+export type RequestKind = (typeof requestKinds)[number];
+
+// Why an email needs nothing from Harbor Point (the walkthrough's `SPAM`, `AUTO-REPLY` and
+// `P6-duplicate`).
+export const noActionReasons = ["spam", "auto-reply", "duplicate"] as const;
+export type NoActionReason = (typeof noActionReasons)[number];
+
+// One Agent run over one Email (speed and observability: the Agent run record). A run with no
+// `ended_at` is still reading. Cost is integer micro-dollars, so it is never a float.
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    modelId: text("model_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    modelCalls: integer("model_calls").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    estimatedCostMicroUsd: integer("estimated_cost_micro_usd").notNull().default(0),
+    outcome: text("outcome", { enum: agentRunOutcomes }),
+    gateVerdict: text("gate_verdict", { enum: gateVerdicts }),
+    errorClass: text("error_class"),
+    // Every Request the email carries, recorded when the run finishes; E027 carries two.
+    requestKinds: text("request_kinds", { enum: requestKinds }).array().notNull().default(sql`'{}'::text[]`),
+    // Set by `close_no_action`; a duplicate names the email it repeats.
+    noActionReason: text("no_action_reason", { enum: noActionReasons }),
+    noActionNote: text("no_action_note"),
+    duplicateOfEmailId: text("duplicate_of_email_id").references(() => emails.emailId),
+  },
+  (table) => [
+    index("agent_runs_email_id_idx").on(table.emailId),
+    check("agent_runs_outcome_check", sql`${table.outcome} in ('released', 'proposal', 'routed', 'no_action', 'failed')`),
+    check("agent_runs_gate_verdict_check", sql`${table.gateVerdict} in ('released', 'review')`),
+    check(
+      "agent_runs_request_kinds_check",
+      sql`${table.requestKinds} <@ array['new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry', 'no action']::text[]`,
+    ),
+    check("agent_runs_no_action_reason_check", sql`${table.noActionReason} in ('spam', 'auto-reply', 'duplicate')`),
+    check(
+      "agent_runs_duplicate_of_check",
+      sql`(${table.noActionReason} is not distinct from 'duplicate') = (${table.duplicateOfEmailId} is not null)`,
+    ),
+  ],
+);
+
+// `held` waits on something outside the desk and can still be decided; `rejected` is final, and so
+// is `released` once its 10-second Undo has passed.
+export const proposalStatuses = ["open", "released", "rejected", "held"] as const;
+export type ProposalStatus = (typeof proposalStatuses)[number];
+
+// What a Proposal does in the ERP: a new sales order, or a change or cancellation of an existing
+// one (charting, "Requests that are not new orders"). They are Request kinds too.
+export const proposalKinds = ["new order", "order change", "cancellation"] as const satisfies readonly RequestKind[];
+export type ProposalKind = (typeof proposalKinds)[number];
+
+// One release check's result, as the gate recorded it.
+export interface RecordedCheck {
+  check: string;
+  passes: boolean;
+  detail: string;
+  // The review reasons a failing check stands for, e.g. `P2-short-stock` and `DATE-unmeetable`.
+  flags?: string[];
+  // What a person can do about it, e.g. a partial shipment, a backorder or declining.
+  choices?: string[];
+}
+
+// A new order the agent proposed. The gate either released it (`so_number` set) or left it open
+// in the review queue with its failing checks. Ship-to and SKUs are the model's words until the
+// gate checks them, so they carry no foreign key.
+//
+// A change or a cancellation names the sales order it applies to in `target_so_number` and always
+// waits for a person; `released` then means a person approved it and it was applied. Its lines
+// are the changes, signed: +5 on an existing line, a new line, or −20 when a line is cancelled.
+// Its total is the change in the order's value.
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.customerId),
+    shipToId: text("ship_to_id").notNull(),
+    customerPo: text("customer_po"),
+    requestedDate: date("requested_date").notNull(),
+    // The customer's own words for the date, when they gave any (U11).
+    requestedDateWords: text("requested_date_words"),
+    // The other date ambiguous words could mean, e.g. "next Tuesday": 3 or 10 Nov.
+    requestedDateAlternative: date("requested_date_alternative"),
+    totalCents: integer("total_cents").notNull(),
+    kind: text("kind", { enum: proposalKinds }).notNull().default("new order"),
+    targetSoNumber: text("target_so_number").references(() => salesOrders.soNumber),
+    // U2: a follow-up to a Proposal still waiting for a person is a Proposal of its own, linked to
+    // that one; Proposals are never amended in place.
+    followsProposalId: integer("follows_proposal_id").references((): AnyPgColumn => proposals.id),
+    status: text("status", { enum: proposalStatuses }).notNull(),
+    checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
+    soNumber: text("so_number").references(() => salesOrders.soNumber),
+    // The person's decision: who, when, and the reason a reject or a hold requires. Null while
+    // open, and on a release the gate made alone.
+    decidedBy: integer("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("proposals_email_id_idx").on(table.emailId),
+    check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held')`),
+    check("proposals_kind_check", sql`${table.kind} in ('new order', 'order change', 'cancellation')`),
+    check("proposals_target_check", sql`(${table.kind} = 'new order') = (${table.targetSoNumber} is null)`),
+  ],
+);
+
+// The price is always the system's; what the email or the model said is kept beside it.
+export const proposalLines = pgTable(
+  "proposal_lines",
+  {
+    proposalId: integer("proposal_id")
+      .notNull()
+      .references(() => proposals.id),
+    lineNo: integer("line_no").notNull(),
+    sku: text("sku").notNull(),
+    quantity: integer("quantity").notNull(),
+    // Null when the SKU is not in the catalog, so there is no system price.
+    unitPriceCents: integer("unit_price_cents"),
+    priceSource: text("price_source", { enum: ["contract", "list"] }),
+    statedPriceCents: integer("stated_price_cents"),
+    customerWords: text("customer_words"),
+    // The earlier sales order a line repeats ("same as last time", "the usual").
+    fromSalesOrder: text("from_sales_order"),
+    // The search this line was chosen from, when the customer described the product in words.
+    productSearchId: integer("product_search_id").references(() => productSearches.id),
+    // The DISCONTINUED SKU the customer asked for, when this line is its replacement (policy 3).
+    replacesSku: text("replaces_sku"),
+    // On a change or a cancellation: the target order's line this changes; null for a line added.
+    orderLineNo: integer("order_line_no"),
+  },
+  (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
+);
+
+// A `search_products` call and what it found, so the gate can check that a described line cites a
+// search that left exactly one ACTIVE candidate (U18), rather than take the model's word for it.
+export const productSearches = pgTable("product_searches", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  query: jsonb("query").$type<Record<string, string>>().notNull(),
+  candidateSkus: jsonb("candidate_skus").$type<string[]>().notNull(),
+  discontinuedSkus: jsonb("discontinued_skus").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const agentFlags = pgTable("agent_flags", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  code: text("code").notNull(),
+  note: text("note").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Why a Request goes to a person rather than to the ERP: its kind's `ROUTE-…` code, or a new
+// order the agent cannot propose (`NO-QTY`, `MISSING-ATTACHMENT`).
+export const routeReasons = ["quote", "return", "billing", "inquiry", "prospect", "no-quantities", "missing-attachment"] as const;
+export type RouteReason = (typeof routeReasons)[number];
+
+// A Request the agent sent to a person with a summary; no ERP change is prepared for it.
+export const routedRequests = pgTable(
+  "routed_requests",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    kind: text("kind", { enum: requestKinds }).notNull(),
+    reason: text("reason", { enum: routeReasons }).notNull(),
+    summary: text("summary").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("routed_requests_email_id_idx").on(table.emailId),
+    check(
+      "routed_requests_kind_check",
+      sql`${table.kind} in ('new order', 'order change', 'cancellation', 'return', 'billing dispute', 'quote request', 'order inquiry')`,
+    ),
+    check(
+      "routed_requests_reason_check",
+      sql`${table.reason} in ('quote', 'return', 'billing', 'inquiry', 'prospect', 'no-quantities', 'missing-attachment')`,
+    ),
+  ],
+);
+
+// Information one email carries for another email's open Requests, for the reviewer (U17: an
+// auto-reply's "away until 9 Nov" lands on the sender's open Requests). It never changes them.
+export const emailNotes = pgTable(
+  "email_notes",
+  {
+    id: serial("id").primaryKey(),
+    // The email the note is shown on.
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    sourceEmailId: text("source_email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    note: text("note").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("email_notes_email_id_idx").on(table.emailId)],
+);
+
+// A reply the agent wrote for a person to edit and approve. It is never sent. Once a person marks
+// it ready, it is locked.
+export const draftReplies = pgTable("draft_replies", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.runId),
+  emailId: text("email_id")
+    .notNull()
+    .references(() => emails.emailId),
+  body: text("body").notNull(),
+  readyBy: integer("ready_by").references(() => users.id),
+  readyAt: timestamp("ready_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Who acted: the agent, the release gate, or a named person.
+export const auditActors = ["agent", "gate", "person"] as const;
+export type AuditActor = (typeof auditActors)[number];
+
+// The append-only event log. Every agent step and gate verdict lands here in the same
+// transaction as the change it records.
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: serial("id").primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    actor: text("actor", { enum: auditActors }).notNull(),
+    userId: integer("user_id").references(() => users.id),
+    action: text("action").notNull(),
+    emailId: text("email_id").references(() => emails.emailId),
+    runId: text("run_id").references(() => agentRuns.runId),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+  },
+  (table) => [
+    index("audit_events_email_id_idx").on(table.emailId),
+    check("audit_events_actor_check", sql`${table.actor} in ('agent', 'gate', 'person')`),
+  ],
+);

@@ -4,27 +4,58 @@
 #   make verify BASE=<branch> CHANGED=<file>  the checks for one ticket's change; <file> lists
 #                                       the changed paths, one per line
 #   make check                          the full check: every test and the build; CI runs it too
+#   make eval [RUNS=3]                  a person's live run of the real model over the 40 emails,
+#                                       scored into eval-reports/; never part of verify or check
 #
-# NOT SET UP YET: `verify` and `check` pass with a warning until the first scaffold ticket
-# replaces them with the app's real lint, typecheck, tests and build. A check that passes on
-# nothing proves nothing, so do not let a second ticket merge before that one.
+# What they run:
+#
+#   verify   lint, the type check, and the tests relevant to the changed files
+#            (scripts/verify-tests.sh says which)
+#   check    lint, the type check, every test, the production build, and `npm audit`,
+#            which fails on a high or critical finding
+#
+# Tests run on an in-process Postgres (PGlite) and a scripted fake model, so no check needs a
+# database server, Docker or a model API key, and none calls a paid API.
 
-.PHONY: help setup verify check docker
+.PHONY: help setup verify check lint typecheck test build audit eval docker
 
 help:
 	@echo "make setup    install dependencies"
 	@echo "make verify   the checks for one change (BASE=<branch> CHANGED=<file>)"
 	@echo "make check    the full check, as CI runs it"
+	@echo "make eval     score a live run of the real model (RUNS=3; needs ANTHROPIC_API_KEY and a local DATABASE_URL)"
 	@echo "make docker   start Docker if it is not running (npm run sandcastle calls it)"
 
 setup:
 	npm install --prefer-offline --no-audit --no-fund
 
-verify:
-	@echo "WARNING: make verify has no checks yet (see the Makefile's header)."
+verify: lint typecheck
+	@test -n "$(CHANGED)" || { echo "make verify needs CHANGED=<file listing the changed paths>"; exit 2; }
+	bash scripts/verify-tests.sh "$(CHANGED)"
 
-check:
-	@echo "WARNING: make check has no checks yet (see the Makefile's header)."
+check: lint typecheck test build audit
+
+lint:
+	npm run lint
+
+typecheck:
+	npm run typecheck
+
+test:
+	npm test
+
+build:
+	npm run build
+
+audit:
+	npm audit --audit-level=high
+
+# Calls the paid model and resets the database to the Snapshot each run, so it refuses to start
+# without ANTHROPIC_API_KEY or with a DATABASE_URL that is not on this machine.
+RUNS ?= 3
+
+eval:
+	EVAL_RUNS=$(RUNS) npx tsx scripts/eval.ts
 
 # How long `make docker` waits for Docker to come up before giving up, in seconds.
 # Override per run: `make docker DOCKER_WAIT=300`, or `DOCKER_WAIT=300 npm run sandcastle`.

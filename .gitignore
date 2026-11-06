@@ -8,9 +8,22 @@ node_modules/
 # Worktrees of this repo live inside it (AGENTS.md, "Branches"). Sandcastle's own
 # are under .sandcastle/worktrees/, ignored by .sandcastle/.gitignore.
 /.worktrees/
-/.claude/worktrees/
+.claude/
 
 .vercel/
+.agents/
+
+.sandcastle/
+
+# `make eval` reports; what matters from them is copied into docs/results.md.
+/eval-reports/
 
 # macOS
 .DS_Store
+.gstack/
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo

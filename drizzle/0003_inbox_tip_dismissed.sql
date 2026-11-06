@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "tip_dismissed_at" timestamp with time zone;
