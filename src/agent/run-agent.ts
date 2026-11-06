@@ -40,6 +40,8 @@ export interface AgentRunSummary {
 export interface RunAgentOptions {
   emailId: string;
   modelId: string;
+  // The person who pressed "Run the agent", recorded on the run's first audit event.
+  startedBy?: number;
   now?: () => Date;
 }
 
@@ -71,6 +73,7 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
     await recordAudit(tx, {
       at: startedAt,
       actor: "agent",
+      userId: options.startedBy ?? null,
       action: "run.started",
       emailId: email.emailId,
       runId,

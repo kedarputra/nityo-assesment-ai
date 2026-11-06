@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { EmailWork } from "@/server/inbox/email-work";
 import type { InboxEmail, InboxEmailWithBody, InboxQuery } from "@/server/inbox/inbox";
 import { countByFilter, isInFilter } from "@/server/inbox/inbox";
 import { InboxDesk, type InboxDeskProps } from "./inbox-desk";
@@ -40,6 +41,7 @@ function renderDesk(overrides: DeskOverrides = {}): string {
       counts={countByFilter(emails)}
       shown={overrides.shown ?? emails.filter((email) => isInFilter(email, query.filter))}
       selected={overrides.selected ?? null}
+      work={overrides.work ?? null}
       tipDismissed={overrides.tipDismissed ?? false}
       query={query}
     />,
@@ -146,10 +148,12 @@ describe("InboxDesk, the selected state", () => {
     expect(html).toMatch(/aria-label="Show"[^>]*><input type="hidden" name="email" value="E005"\/>/);
   });
 
-  it("shows the Proposal pane's empty state: no agent has run on this email", () => {
+  it("shows the Proposal pane's empty state: no agent has run on this email, and offers to run it", () => {
     const html = renderDesk({ query: { emailId: "E005" }, selected: jenna });
 
     expect(html).toContain("The agent hasn’t read this email yet.");
+    // A secondary button, not the view's one primary (DESIGN.md, "Buttons").
+    expect(html).toContain('<button type="button" class="btn" aria-busy="false">Run the agent</button>');
   });
 
   it("renders a body, subject and sender name containing markup as text, never as HTML", () => {
@@ -169,5 +173,130 @@ describe("InboxDesk, the selected state", () => {
     expect(html).not.toContain("<img");
     expect(html).not.toContain("<b>Urgent</b>");
     expect(html).toContain('<h2 class="title">&lt;b&gt;Urgent&lt;/b&gt;</h2>');
+  });
+});
+
+const allChecksPass = [
+  "known-contact",
+  "skus-sellable",
+  "system-price",
+  "full-stock",
+  "credit-hold",
+  "credit-limit",
+  "ship-to",
+  "no-flags",
+].map((check) => ({ check, passes: true, detail: `${check} is fine.` }));
+
+// E001 as the agent leaves it: released as SO-24059 with a confirmation Draft reply.
+const e001Released: EmailWork = {
+  run: { runId: "run-1", finished: true, outcome: "released", errorClass: null },
+  proposals: [
+    {
+      id: 1,
+      status: "released",
+      soNumber: "SO-24059",
+      customerName: "Bluefin Bistro Group",
+      shipToId: "S001",
+      shipToName: "Bluefin Bistro - Pier Street",
+      requestedDate: "2026-11-05",
+      totalCents: 67200,
+      checks: allChecksPass,
+      lines: [
+        {
+          lineNo: 1,
+          sku: "HPS-1408",
+          productName: "Wooden Cutlery Kit (fork, knife, napkin)",
+          quantity: 4,
+          unitPriceCents: 4500,
+          priceSource: "list",
+          lineTotalCents: 18000,
+        },
+      ],
+    },
+  ],
+  flags: [],
+  draftReply: "Hi Maria, SO-24059 is confirmed for Thursday.",
+};
+
+describe("InboxDesk, the Proposal pane after a run", () => {
+  const released: InboxEmailWithBody = { ...maria, status: "released" };
+
+  it("shows a released order's headline, its checks folded as good, its lines and the confirmation reply", () => {
+    const html = renderDesk({
+      emails: [listed(released), listed(jenna)],
+      query: { emailId: "E001" },
+      selected: released,
+      work: e001Released,
+    });
+
+    expect(html).toContain('<span class="pill pill--released"><span aria-hidden="true">✓</span>Done by the agent</span>');
+    expect(html).toContain('<h2 class="headline">Released SO-24059: $672.00 for Bluefin Bistro Group</h2>');
+    expect(html).toContain("Bluefin Bistro - Pier Street · wanted Thu 5 Nov");
+    expect(html).toContain("<summary>8 checks look good</summary>");
+    expect(html).not.toContain("Why it’s waiting for you");
+    expect(html).toContain('<span class="id">HPS-1408</span>');
+    expect(html).toContain("$180.00");
+    expect(html).toContain(
+      '<textarea id="draft-reply" class="reading" readOnly="" rows="8">Hi Maria, SO-24059 is confirmed for Thursday.</textarea>',
+    );
+    expect(html).toContain("We never send email from here; this is what would go out.");
+    expect(html).toContain("1 of 2 handled");
+  });
+
+  it("lists only the failing checks under why it’s waiting, with the rest folded", () => {
+    const [proposal] = e001Released.proposals;
+    if (!proposal) throw new Error("no proposal");
+    const review: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [
+        {
+          ...proposal,
+          status: "open",
+          soNumber: null,
+          checks: allChecksPass.map((check) =>
+            check.check === "system-price" ? { ...check, passes: false, detail: "HPS-1408 stated $30.00, system $45.00." } : check,
+          ),
+        },
+      ],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: waiting, work: review });
+
+    expect(html).toContain('<h2 class="headline">New order for Bluefin Bistro Group, $672.00, waiting for you</h2>');
+    expect(html).toContain("Why it’s waiting for you");
+    expect(html).toContain("<b>System prices.</b> HPS-1408 stated $30.00, system $45.00.");
+    expect(html).toContain("<summary>7 checks look good</summary>");
+  });
+
+  it("says calmly when a run did not finish", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "call-cap" },
+      proposals: [],
+      flags: [],
+      draftReply: null,
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The agent didn’t finish this email");
+    expect(html).toContain("call-cap");
+  });
+
+  it("shows Reading… while a run is under way", () => {
+    const reading: InboxEmailWithBody = { ...maria, status: "reading" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: false, outcome: null, errorClass: null },
+      proposals: [],
+      flags: [],
+      draftReply: null,
+    };
+
+    const html = renderDesk({ emails: [listed(reading)], query: { emailId: "E001" }, selected: reading, work });
+
+    expect(html).toContain('<span class="pill pill--reading"><span aria-hidden="true">…</span>Reading…</span>');
+    expect(html).toContain("The agent is reading this email");
   });
 });

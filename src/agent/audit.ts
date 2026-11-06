@@ -4,6 +4,8 @@ import { auditEvents, type AuditActor } from "@/db/schema";
 export interface AuditEvent {
   at: Date;
   actor: AuditActor;
+  // The signed-in person behind the event, when there is one.
+  userId?: number | null;
   action: string;
   emailId: string | null;
   runId: string | null;

@@ -2,15 +2,18 @@ import Form from "next/form";
 import Link from "next/link";
 import { formatBusinessDay, formatBusinessTime } from "@/lib/business-clock";
 import { dismissTipAction } from "@/server/inbox/actions";
+import type { EmailWork } from "@/server/inbox/email-work";
 import {
   type InboxEmail,
   type InboxEmailWithBody,
   type InboxFilter,
   type InboxQuery,
-  type InboxStatus,
   inboxFilters,
+  isHandled,
 } from "@/server/inbox/inbox";
+import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
+import { ProposalPane } from "./proposal-pane";
 
 const INBOX_PATH = "/";
 
@@ -22,6 +25,8 @@ export interface InboxDeskProps {
   // The emails the chosen filter shows.
   shown: InboxEmail[];
   selected: InboxEmailWithBody | null;
+  // What the agent did with the selected email, or null when it has not run on it.
+  work: EmailWork | null;
   tipDismissed: boolean;
 }
 
@@ -32,42 +37,31 @@ const FILTER_NAMES: Record<InboxFilter, string> = {
   other: "Other",
 };
 
-// Each status has an icon and words, never colour alone (DESIGN.md, "Colour").
-const STATUS_PILLS: Record<InboxStatus, { icon: string; words: string }> = {
-  not_run: { icon: "○", words: "Not run yet" },
-};
-
-// An email counts as handled once a run or a person has finished with it.
-function isHandled(status: InboxStatus): boolean {
-  switch (status) {
-    case "not_run":
-      return false;
-  }
-}
-
 // The three-pane desk (DESIGN.md, "Layout and responsiveness"). The URL holds its state, so
 // every control is a GET form: a native button that works before the page's script loads.
-export function InboxDesk({ query, emails, counts, shown, selected, tipDismissed }: InboxDeskProps) {
+export function InboxDesk({ query, emails, counts, shown, selected, work, tipDismissed }: InboxDeskProps) {
   return (
-    <div className="desk" data-view={query.view}>
-      <section className="desk-pane desk-pane--list" aria-label="Emails">
-        <GreetingCard emails={emails} />
-        {tipDismissed ? null : <TipCard />}
-        <FilterBar query={query} counts={counts} />
-        <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
-      </section>
-      <div className="desk-back">
-        <Link className="btn btn--ghost" href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}>
-          ← All emails
-        </Link>
+    <AgentRunsProvider>
+      <div className="desk" data-view={query.view}>
+        <section className="desk-pane desk-pane--list" aria-label="Emails">
+          <GreetingCard emails={emails} />
+          {tipDismissed ? null : <TipCard />}
+          <FilterBar query={query} counts={counts} />
+          <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
+        </section>
+        <div className="desk-back">
+          <Link className="btn btn--ghost" href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}>
+            ← All emails
+          </Link>
+        </div>
+        <section className="desk-pane desk-pane--email" aria-label="Email">
+          {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
+        </section>
+        <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
+          <ProposalPane email={selected} work={work} />
+        </section>
       </div>
-      <section className="desk-pane desk-pane--email" aria-label="Email">
-        {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
-      </section>
-      <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
-        <ProposalEmpty email={selected} />
-      </section>
-    </div>
+    </AgentRunsProvider>
   );
 }
 
@@ -183,20 +177,10 @@ function EmailRow({ email, selected }: { email: InboxEmail; selected: boolean })
         </span>
         <span className="row-subject">{email.subject}</span>
         <span className="row-bottom">
-          <StatusPill status={email.status} />
+          <RowStatus emailId={email.emailId} status={email.status} />
         </span>
       </span>
     </button>
-  );
-}
-
-function StatusPill({ status }: { status: InboxStatus }) {
-  const pill = STATUS_PILLS[status];
-  return (
-    <span className={`pill pill--${status}`}>
-      <span aria-hidden="true">{pill.icon}</span>
-      {pill.words}
-    </span>
   );
 }
 
@@ -228,19 +212,6 @@ function NoEmailChosen() {
     <div className="pane-empty">
       <h2 className="title">No email chosen</h2>
       <p className="meta">Choose an email from the list to read it here.</p>
-    </div>
-  );
-}
-
-function ProposalEmpty({ email }: { email: InboxEmailWithBody | null }) {
-  return (
-    <div className="pane-empty">
-      {email ? <StatusPill status={email.status} /> : null}
-      <h2 className="headline">Nothing to decide yet</h2>
-      <p className="meta">
-        The agent hasn’t read {email ? "this email" : "today’s emails"} yet. When it has, what it proposes shows up
-        here for you to approve, change or reject.
-      </p>
     </div>
   );
 }

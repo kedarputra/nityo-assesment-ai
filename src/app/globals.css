@@ -432,9 +432,42 @@ nav.tabs a[aria-current="page"] {
   white-space: nowrap;
 }
 
-.pill--not_run {
+.pill--not_run,
+.pill--reading {
   background: var(--sunken);
   color: var(--ink-muted);
+}
+
+.pill--reading {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.pill--released,
+.pill--no_action {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.pill--needs_you {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pill--failed {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill--reading {
+    animation: none;
+  }
 }
 
 .av {
@@ -786,4 +819,145 @@ ul.rows {
   margin-top: var(--s3);
   display: grid;
   gap: var(--s2);
+}
+
+/* The Proposal pane (DESIGN.md, "Components") */
+.proposal {
+  display: grid;
+  gap: var(--s5);
+  justify-items: start;
+}
+
+.proposal > * {
+  justify-self: stretch;
+}
+
+.proposal > .pill {
+  justify-self: start;
+}
+
+.proposal-card {
+  display: grid;
+  gap: var(--s3);
+  overflow-wrap: anywhere;
+}
+
+.section-name {
+  font: 600 14px/1.35 var(--sans);
+  color: var(--ink-muted);
+}
+
+.why-waiting {
+  background: var(--warn-soft);
+  border-radius: var(--r-md);
+  padding: var(--s3) var(--s4);
+  display: grid;
+  gap: var(--s2);
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s2);
+  font-size: 14px;
+}
+
+.checks li {
+  display: flex;
+  gap: var(--s2);
+}
+
+.checks-ok summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ok);
+}
+
+.checks-ok .checks {
+  margin-top: var(--s2);
+}
+
+.lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.lines th,
+.lines td {
+  text-align: left;
+  padding: var(--s2) var(--s1);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+
+.lines thead th {
+  font: 600 13px/1.3 var(--sans);
+  color: var(--ink-muted);
+}
+
+.lines .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines tfoot th,
+.lines tfoot td {
+  font-weight: 700;
+  border-bottom: none;
+}
+
+@media (max-width: 767px) {
+  .lines {
+    font-size: 16px;
+  }
+}
+
+.reply {
+  display: grid;
+  gap: var(--s2);
+}
+
+.reply textarea {
+  width: 100%;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-md);
+  padding: var(--s3);
+  resize: vertical;
+}
+
+.run-agent {
+  display: grid;
+  gap: var(--s2);
+  justify-items: start;
+  margin-top: var(--s2);
+}
+
+.card--bad {
+  background: var(--bad-soft);
+  border-color: transparent;
+  display: grid;
+  gap: var(--s2);
+}
+
+.skeleton {
+  width: 100%;
+  height: 56px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton--short {
+  width: 60%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { users } from "@/db/schema";
+import { agentRuns, users } from "@/db/schema";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import {
@@ -65,6 +65,36 @@ describe("the inbox", () => {
 
     expect(await isTipDismissed(testDatabase.db, ana)).toBe(true);
     expect(await isTipDismissed(testDatabase.db, ben)).toBe(false);
+  });
+});
+
+describe("an email's status after an Agent run", () => {
+  let testDatabase: TestDatabase;
+
+  beforeAll(async () => {
+    testDatabase = await createTestDatabase();
+    await ingestSnapshot(testDatabase.db);
+    const startedAt = new Date("2026-11-02T12:05:00Z");
+    const endedAt = new Date("2026-11-02T12:06:00Z");
+    await testDatabase.db.insert(agentRuns).values([
+      { runId: "run-1", emailId: "E001", modelId: "fake", startedAt, endedAt, outcome: "released" },
+      { runId: "run-2", emailId: "E002", modelId: "fake", startedAt },
+      { runId: "run-3", emailId: "E003", modelId: "fake", startedAt, endedAt, outcome: "proposal" },
+      { runId: "run-4", emailId: "E004", modelId: "fake", startedAt, endedAt, outcome: "failed" },
+    ]);
+  });
+
+  afterAll(async () => {
+    await testDatabase.close();
+  });
+
+  it("shows the latest run: done, still reading, needs you, or failed", async () => {
+    const emails = await listInboxEmails(testDatabase.db);
+    const statuses = Object.fromEntries(emails.slice(0, 5).map((email) => [email.emailId, email.status]));
+
+    expect(statuses).toEqual({ E001: "released", E002: "reading", E003: "needs_you", E004: "failed", E005: "not_run" });
+    expect(await findInboxEmail(testDatabase.db, "E001")).toMatchObject({ status: "released" });
+    expect(countByFilter(emails)).toEqual({ all: 40, "needs-you": 2, done: 1, other: 37 });
   });
 });
 

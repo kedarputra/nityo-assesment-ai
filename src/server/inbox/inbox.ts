@@ -1,11 +1,12 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
-import { emails, users } from "@/db/schema";
+import { agentRuns, emails, users, type AgentRunOutcome } from "@/db/schema";
 
-// Where an email stands on the desk. No Agent run exists yet, so every email is "not_run";
-// later tickets add the statuses a run and a person's decision produce.
-export type InboxStatus = "not_run";
+// Where an email stands on the desk, from its latest Agent run. Later tickets add the statuses
+// a person's decision produces.
+export const inboxStatuses = ["not_run", "reading", "released", "needs_you", "no_action", "failed"] as const;
+export type InboxStatus = (typeof inboxStatuses)[number];
 
 export const inboxFilters = ["all", "needs-you", "done", "other"] as const;
 export type InboxFilter = (typeof inboxFilters)[number];
@@ -36,7 +37,8 @@ const listColumns = {
 
 export async function listInboxEmails(db: Database): Promise<InboxEmail[]> {
   const rows = await db.select(listColumns).from(emails).orderBy(asc(emails.receivedAt), asc(emails.emailId));
-  return rows.map((row) => ({ ...row, status: "not_run" }));
+  const runs = await latestRuns(db);
+  return rows.map((row) => ({ ...row, status: statusOf(runs.get(row.emailId)) }));
 }
 
 export async function findInboxEmail(db: Database, emailId: string): Promise<InboxEmailWithBody | null> {
@@ -44,15 +46,62 @@ export async function findInboxEmail(db: Database, emailId: string): Promise<Inb
     .select({ ...listColumns, body: emails.body })
     .from(emails)
     .where(eq(emails.emailId, emailId));
-  return row ? { ...row, status: "not_run" } : null;
+  if (!row) return null;
+  const runs = await latestRuns(db, emailId);
+  return { ...row, status: statusOf(runs.get(emailId)) };
+}
+
+interface RunState {
+  endedAt: Date | null;
+  outcome: AgentRunOutcome | null;
+}
+
+// Each email's latest Agent run, newest first so the first one seen wins.
+async function latestRuns(db: Database, emailId?: string): Promise<Map<string, RunState>> {
+  const rows = await db
+    .select({ emailId: agentRuns.emailId, endedAt: agentRuns.endedAt, outcome: agentRuns.outcome })
+    .from(agentRuns)
+    .where(emailId === undefined ? undefined : eq(agentRuns.emailId, emailId))
+    .orderBy(desc(agentRuns.startedAt));
+  const latest = new Map<string, RunState>();
+  for (const row of rows) if (!latest.has(row.emailId)) latest.set(row.emailId, row);
+  return latest;
+}
+
+function statusOf(run: RunState | undefined): InboxStatus {
+  if (!run) return "not_run";
+  if (run.endedAt === null || run.outcome === null) return "reading";
+  switch (run.outcome) {
+    case "released":
+      return "released";
+    case "proposal":
+    case "routed":
+      return "needs_you";
+    case "no_action":
+      return "no_action";
+    case "failed":
+      return "failed";
+  }
 }
 
 // The filter an email of this status falls under, besides All.
 function filterOf(status: InboxStatus): Exclude<InboxFilter, "all"> {
   switch (status) {
+    case "released":
+    case "no_action":
+      return "done";
+    case "needs_you":
+    case "failed":
+      return "needs-you";
     case "not_run":
+    case "reading":
       return "other";
   }
+}
+
+// An email counts as handled once a run has finished with it and nothing is left for a person.
+export function isHandled(status: InboxStatus): boolean {
+  return filterOf(status) === "done";
 }
 
 export function isInFilter(email: InboxEmail, filter: InboxFilter): boolean {
