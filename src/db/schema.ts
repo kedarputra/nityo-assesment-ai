@@ -165,6 +165,8 @@ export const users = pgTable(
     username: text("username").notNull().unique(),
     passwordHash: text("password_hash").notNull(),
     role: text("role", { enum: userRoles }).notNull(),
+    // When the person dismissed the inbox's tip card; it stays dismissed on every device.
+    tipDismissedAt: timestamp("tip_dismissed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [check("users_role_check", sql`${table.role} in ('reviewer', 'admin')`)],
