@@ -4,13 +4,14 @@ import * as schema from "@/db/schema";
 import { ingestSnapshot, resetToSnapshot } from "./snapshot";
 
 // `npm run db:ingest` loads the Snapshot into a freshly migrated, empty database;
-// `npm run db:reset` returns a loaded one to it. Both use DATABASE_URL.
+// `npm run db:reset` returns a loaded one to it. Both go around Neon's pooler on
+// DATABASE_URL_UNPOOLED, falling back to DATABASE_URL for a local Postgres, which has no pooler.
 async function main(command: string | undefined): Promise<void> {
   if (command !== "ingest" && command !== "reset") {
     throw new Error("usage: cli.ts ingest|reset");
   }
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error("DATABASE_URL is not set; see .env.example.");
+  const connectionString = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL_UNPOOLED (or DATABASE_URL) is not set; see .env.example.");
 
   const pool = new Pool({ connectionString });
   try {

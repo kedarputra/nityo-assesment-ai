@@ -10,6 +10,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:prepare": "tsx scripts/prepare-database.ts",
     "db:ingest": "tsx src/snapshot/cli.ts ingest",
     "db:reset": "tsx src/snapshot/cli.ts reset",
     "sandcastle": "make docker && pnpm dlx tsx .sandcastle/main.mts",
