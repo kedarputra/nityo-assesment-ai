@@ -53,7 +53,7 @@ export function InboxDesk({ query, emails, counts, shown, selected, work, tipDis
       >
         <div className="desk" data-view={query.view}>
           <section className="desk-pane desk-pane--list" aria-label="Emails">
-            <GreetingCard emails={emails} />
+            <GreetingCard emails={emails} agentOn={agentOn} />
             {tipDismissed ? null : <TipCard />}
             <FilterBar query={query} counts={counts} />
             <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
@@ -81,7 +81,7 @@ function inboxHref({ filter, emailId }: { filter: InboxFilter; emailId: string |
   return `${INBOX_PATH}?${params.toString()}`;
 }
 
-function GreetingCard({ emails }: { emails: InboxEmail[] }) {
+function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: boolean }) {
   const total = emails.length;
   const handled = emails.filter((email) => isHandled(email.status)).length;
   const percent = total === 0 ? 0 : Math.round((handled / total) * 100);
@@ -90,7 +90,7 @@ function GreetingCard({ emails }: { emails: InboxEmail[] }) {
     <div className="greeting-card">
       {/* The business clock is fixed at 07:00 on Mon 2 Nov (case policy 1), so it is always morning. */}
       <h1 className="greeting">Good morning</h1>
-      <p className="greeting-count">{greetingCount(total, handled)}</p>
+      <p className="greeting-count">{greetingCount(total, handled, agentOn)}</p>
       <div
         className="progress"
         role="progressbar"
@@ -108,9 +108,10 @@ function GreetingCard({ emails }: { emails: InboxEmail[] }) {
   );
 }
 
-function greetingCount(total: number, handled: number): string {
+function greetingCount(total: number, handled: number, agentOn: boolean): string {
   if (total === 0) return "No emails have come in today.";
   const emailsToday = total === 1 ? "1 email came in today." : `${total} emails came in today.`;
+  if (handled === 0 && !agentOn) return `${emailsToday} The agent is switched off, so they’re yours to read.`;
   if (handled === 0) return `${emailsToday} The agent hasn’t read any of them yet.`;
   return `${emailsToday} ${handled} handled so far.`;
 }

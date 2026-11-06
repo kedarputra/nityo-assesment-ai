@@ -90,7 +90,15 @@ function NothingToDecide({ email, agentOn }: { email: InboxEmailWithBody | null;
           here for you to approve, change or reject.
         </p>
       ) : (
-        <p className="meta">{AGENT_OFF_MESSAGE} You can still read every email and handle it yourself.</p>
+        <div className="agent-off" role="note">
+          <span className="agent-off-icon" aria-hidden="true">
+            ⏸︎
+          </span>
+          <p>
+            <b>{AGENT_OFF_MESSAGE}</b> You can still read every email and handle it yourself; when the agent is on, its
+            proposal for each email shows up here.
+          </p>
+        </div>
       )}
       {email && agentOn ? <RunAgentButton emailId={email.emailId} /> : null}
     </div>

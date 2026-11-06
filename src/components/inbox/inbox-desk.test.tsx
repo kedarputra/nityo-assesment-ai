@@ -119,6 +119,10 @@ describe("InboxDesk, the list", () => {
     expect(html).toContain("0 of 2 handled");
   });
 
+  it("says in the greeting that the emails are the reader's own when the agent is switched off", () => {
+    expect(renderDesk({ agentOn: false })).toContain("2 emails came in today. The agent is switched off, so they’re yours to read.");
+  });
+
   it("shows the tip card until this person dismisses it", () => {
     expect(renderDesk({ tipDismissed: false })).toContain("How this works:");
     expect(renderDesk({ tipDismissed: true })).not.toContain("How this works:");

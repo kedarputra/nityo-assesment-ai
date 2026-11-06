@@ -386,12 +386,186 @@ input::placeholder {
   }
 }
 
-/* Sign-in */
+/* Sign-in: what the desk does, beside the form on a desk and above it on a phone */
 .sign-in {
   max-width: 400px;
   margin: var(--s6) auto 0;
   display: grid;
   gap: var(--s3);
+}
+
+.sign-in-layout {
+  max-width: 960px;
+  margin: var(--s5) auto 0;
+  display: grid;
+  gap: var(--s3);
+}
+
+/* On a phone the form comes first, so signing in never needs a scroll. */
+.sign-in-layout > .sign-in {
+  max-width: none;
+  margin: 0;
+  align-content: center;
+  order: -1;
+}
+
+.sign-in-intro {
+  background: var(--accent-soft);
+  border-radius: var(--r-xl);
+  padding: var(--s5) var(--s4);
+  display: grid;
+  gap: var(--s4);
+  align-content: start;
+}
+
+.sign-in-kicker {
+  font: 600 14px/1.4 var(--sans);
+  color: var(--accent);
+}
+
+.sign-in-display {
+  font: 700 24px/1.2 var(--sans);
+  letter-spacing: -0.5px;
+  text-wrap: balance;
+}
+
+.sign-in-points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s3);
+}
+
+.sign-in-points li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: var(--s3);
+  align-items: start;
+  color: var(--ink-muted);
+}
+
+.sign-in-points strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sign-in-step {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--accent);
+  font: 700 13px/1 var(--sans);
+}
+
+.sign-in-day {
+  font: 500 13px/1.4 var(--sans);
+  color: var(--ink-muted);
+}
+
+@media (min-width: 900px) {
+  .sign-in-layout {
+    grid-template-columns: 1.1fr 1fr;
+    gap: 0;
+    margin-top: var(--s7);
+  }
+
+  .sign-in-intro {
+    border-radius: var(--r-xl) 0 0 var(--r-xl);
+    padding: 40px;
+    gap: var(--s5);
+  }
+
+  .sign-in-display {
+    font-size: 30px;
+    line-height: 1.15;
+    letter-spacing: -0.6px;
+  }
+
+  .sign-in-day {
+    margin-top: auto;
+  }
+
+  .sign-in-layout > .sign-in {
+    order: 0;
+    border-radius: 0 var(--r-xl) var(--r-xl) 0;
+    border-left: 0;
+    padding: 40px;
+  }
+}
+
+/* The signed-in person, in the header */
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.who-text {
+  display: grid;
+}
+
+/* Declared after .hide-phone, so it repeats the phone rule: only the avatar shows on a phone. */
+@media (max-width: 767px) {
+  .who-text {
+    display: none;
+  }
+}
+
+/* The narrowest phones keep the tabs and Sign out on one line by dropping the avatar too. */
+@media (max-width: 399px) {
+  .who {
+    display: none;
+  }
+}
+
+.who-name {
+  font: 600 14px/1.25 var(--sans);
+}
+
+.who-role {
+  font: 500 13px/1.25 var(--sans);
+  color: var(--ink-muted);
+}
+
+@media (max-width: 1199px) {
+  .hide-tablet {
+    display: none;
+  }
+}
+
+/* The agent is switched off: a calm note in place of "Run the agent" */
+.agent-off {
+  justify-self: stretch;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s3);
+  align-items: start;
+  margin-top: var(--s2);
+  padding: var(--s4);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  border: 1px solid var(--hairline);
+  color: var(--ink-muted);
+}
+
+.agent-off b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.agent-off-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 14px;
 }
 
 .sign-in-form {
@@ -1223,5 +1397,22 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .toast {
     animation: none;
+  }
+}
+
+/* Last in the file, so it wins over the phone rules above. */
+/* At 320px the wordmark, both tabs and Sign out fit only with tighter gaps. */
+@media (max-width: 359px) {
+  .top {
+    gap: var(--s2);
+    padding-inline: var(--s3);
+  }
+
+  header .right {
+    gap: var(--s2);
+  }
+
+  nav.tabs a {
+    padding: 0 var(--s1);
   }
 }

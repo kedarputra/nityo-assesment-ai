@@ -195,6 +195,11 @@ One of each.
   happened and what's left, and offers **Undo** for 10 seconds after a release.
 - **Audit log.** A table on a desk, a list of cards on a phone: when, who (agent, gate, or a named
   person), what, which email, and the detail. Newest first, filterable by email.
+- **Sign-in.** Two halves of one card on a desk: on the left, an `accent-soft` panel saying what the
+  desk does (a teal kicker, a 30px headline, three numbered points, the inbox's day); on the right,
+  the form. On a phone the form comes first and the panel follows, so signing in never needs a scroll.
+- **Account.** At the right of the header: the business date (desk only), an avatar with the
+  username and role (the avatar alone on phones, nothing under 400px), and "Sign out".
 
 ## Interaction
 
@@ -215,6 +220,8 @@ One of each.
   decided 4." with a link to the audit log.
 - **Agent working:** the row says "Reading…" with a soft pulse; the detail keeps its shape with
   skeletons.
+- **Agent switched off** (a deploy with no model key): the greeting says the emails are the reader's
+  to read, and the Proposal pane shows a `sunken` note with a pause icon in place of "Run the agent".
 - **Errors** are calm sentences with a next step, in a `bad-soft` card, never a raw code.
 - **Long content** truncates in rows and wraps in cards; names, subjects and products are tested at
   5 and 80 characters.
