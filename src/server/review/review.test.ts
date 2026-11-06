@@ -1,7 +1,16 @@
 import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runAgent } from "@/agent/run-agent";
-import { auditEvents, draftReplies, inventory, proposalLines, proposals, salesOrderLines, salesOrders, users } from "@/db/schema";
+import {
+  auditEvents,
+  draftReplies,
+  inventory,
+  proposalLines,
+  proposals,
+  salesOrderLines,
+  salesOrders,
+  users,
+} from "@/db/schema";
 import { ScriptedModel } from "@/model/scripted-model";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
@@ -75,7 +84,12 @@ describe("reviewing a Proposal", () => {
       const proposal = await proposalFor("E019", e019Script());
       expect(proposal.checks.filter((check) => !check.passes).map((check) => check.check)).toEqual(["no-flags"]);
 
-      const refused = await approveProposal(db, { proposalId: proposal.id, userId, notes: { "no-flags": "  " }, at: AT });
+      const refused = await approveProposal(db, {
+        proposalId: proposal.id,
+        userId,
+        notes: { "no-flags": "  " },
+        at: AT,
+      });
       expect(refused).toEqual({ released: false, hardRules: [], missingNotes: ["no-flags"] });
       expect((await proposalNow(proposal.id)).status).toBe("open");
       expect(await available("HPS-1001")).toBe(60);
@@ -87,8 +101,18 @@ describe("reviewing a Proposal", () => {
         at: AT,
       });
 
-      expect(approved).toEqual({ released: true, soNumber: "SO-24059", totalCents: 27200, customerName: "Northside Community Center" });
-      expect(await proposalNow(proposal.id)).toMatchObject({ status: "released", soNumber: "SO-24059", decidedBy: userId });
+      expect(approved).toEqual({
+        released: true,
+        emailId: "E019",
+        soNumber: "SO-24059",
+        totalCents: 27200,
+        customerName: "Northside Community Center",
+      });
+      expect(await proposalNow(proposal.id)).toMatchObject({
+        status: "released",
+        soNumber: "SO-24059",
+        decidedBy: userId,
+      });
       const lines = await db.select().from(salesOrderLines).where(eq(salesOrderLines.soNumber, "SO-24059"));
       expect(lines.map(({ sku, qtyOrdered, unitPriceCents }) => ({ sku, qtyOrdered, unitPriceCents }))).toEqual([
         { sku: "HPS-1001", qtyOrdered: 4, unitPriceCents: 6800 },
@@ -112,16 +136,24 @@ describe("reviewing a Proposal", () => {
 
       const undone = await undoRelease(db, { proposalId: proposal.id, userId, at: later(UNDO_WINDOW_MS - 1) });
 
-      expect(undone).toEqual({ soNumber: "SO-24059" });
+      expect(undone).toEqual({ soNumber: "SO-24059", emailId: "E019" });
       expect(await available("HPS-1001")).toBe(60);
       expect(await db.select().from(salesOrders).where(eq(salesOrders.soNumber, "SO-24059"))).toEqual([]);
       expect(await proposalNow(proposal.id)).toMatchObject({ status: "open", soNumber: null, decidedBy: null });
       const events = await personEvents("E019");
       expect(events.at(-1)).toMatchObject({ action: "release.undone", userId });
-      expect(events.at(-1)?.detail).toMatchObject({ soNumber: "SO-24059", returned: [{ sku: "HPS-1001", quantity: 4 }] });
+      expect(events.at(-1)?.detail).toMatchObject({
+        soNumber: "SO-24059",
+        returned: [{ sku: "HPS-1001", quantity: 4 }],
+      });
 
       // Approved again, it takes a new number: SO-24059 stays the withdrawn order's alone.
-      const again = await approveProposal(db, { proposalId: proposal.id, userId, notes: { "no-flags": "Confirmed." }, at: later(20_000) });
+      const again = await approveProposal(db, {
+        proposalId: proposal.id,
+        userId,
+        notes: { "no-flags": "Confirmed." },
+        at: later(20_000),
+      });
       expect(again).toMatchObject({ released: true, soNumber: "SO-24060" });
     });
 
@@ -130,9 +162,9 @@ describe("reviewing a Proposal", () => {
       const proposal = await proposalFor("E019", e019Script());
       await approveProposal(db, { proposalId: proposal.id, userId, notes: { "no-flags": "Confirmed." }, at: AT });
 
-      await expect(undoRelease(db, { proposalId: proposal.id, userId, at: later(UNDO_WINDOW_MS + 1) })).rejects.toBeInstanceOf(
-        ReviewRefused,
-      );
+      await expect(
+        undoRelease(db, { proposalId: proposal.id, userId, at: later(UNDO_WINDOW_MS + 1) }),
+      ).rejects.toBeInstanceOf(ReviewRefused);
       expect(await available("HPS-1001")).toBe(56);
       expect((await proposalNow(proposal.id)).status).toBe("released");
     });
@@ -148,30 +180,58 @@ describe("reviewing a Proposal", () => {
         edit: { kind: "quantity", lineNo: 1, quantity: 61 },
         at: AT,
       });
-      expect(afterQuantity.filter((check) => !check.passes).map((check) => check.check)).toEqual(["full-stock", "credit-limit", "no-flags"]);
+      expect(afterQuantity.filter((check) => !check.passes).map((check) => check.check)).toEqual([
+        "full-stock",
+        "credit-limit",
+        "no-flags",
+      ]);
       expect(await proposalNow(proposal.id)).toMatchObject({ totalCents: 61 * 6800 });
 
       // Back to the discontinued HPS-1004 at $45.00: within the limit again, but a hard rule fails.
-      const afterSku = await editProposal(db, { proposalId: proposal.id, userId, edit: { kind: "sku", lineNo: 1, sku: "HPS-1004" }, at: AT });
-      expect(afterSku.filter((check) => !check.passes).map((check) => check.check)).toEqual(["skus-sellable", "full-stock", "no-flags"]);
+      const afterSku = await editProposal(db, {
+        proposalId: proposal.id,
+        userId,
+        edit: { kind: "sku", lineNo: 1, sku: "HPS-1004" },
+        at: AT,
+      });
+      expect(afterSku.filter((check) => !check.passes).map((check) => check.check)).toEqual([
+        "skus-sellable",
+        "full-stock",
+        "no-flags",
+      ]);
       const [line] = await db.select().from(proposalLines).where(eq(proposalLines.proposalId, proposal.id));
       expect(line).toMatchObject({ sku: "HPS-1004", quantity: 61, unitPriceCents: 4500 });
 
-      const events = await testDatabase.db.select().from(auditEvents).where(eq(auditEvents.emailId, "E019")).orderBy(asc(auditEvents.id));
+      const events = await testDatabase.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.emailId, "E019"))
+        .orderBy(asc(auditEvents.id));
       const edits = events.filter((event) => event.action === "proposal.edited");
       expect(edits.map((event) => [event.userId, event.detail.edit, event.detail.before])).toEqual([
         [userId, { kind: "quantity", lineNo: 1, quantity: 61 }, { sku: "HPS-1001", quantity: 4 }],
         [userId, { kind: "sku", lineNo: 1, sku: "HPS-1004" }, { sku: "HPS-1001", quantity: 61 }],
       ]);
-      expect(events.filter((event) => event.action === "gate.verdict" && event.detail.recheck === true)).toHaveLength(2);
+      expect(events.filter((event) => event.action === "gate.verdict" && event.detail.recheck === true)).toHaveLength(
+        2,
+      );
     });
 
     it("adds and removes lines and changes the ship-to only among the customer's own", async () => {
       const db = testDatabase.db;
       const proposal = await proposalFor("E019", e019Script());
 
-      await editProposal(db, { proposalId: proposal.id, userId, edit: { kind: "add-line", sku: "HPS-1002", quantity: 2 }, at: AT });
-      let lines = await db.select().from(proposalLines).where(eq(proposalLines.proposalId, proposal.id)).orderBy(asc(proposalLines.lineNo));
+      await editProposal(db, {
+        proposalId: proposal.id,
+        userId,
+        edit: { kind: "add-line", sku: "HPS-1002", quantity: 2 },
+        at: AT,
+      });
+      let lines = await db
+        .select()
+        .from(proposalLines)
+        .where(eq(proposalLines.proposalId, proposal.id))
+        .orderBy(asc(proposalLines.lineNo));
       expect(lines.map((line) => [line.lineNo, line.sku, line.quantity])).toEqual([
         [1, "HPS-1001", 4],
         [2, "HPS-1002", 2],
@@ -221,7 +281,10 @@ describe("reviewing a Proposal", () => {
       });
 
       expect(result).toMatchObject({ released: false, missingNotes: [] });
-      expect(result.released === false && result.hardRules.map((check) => check.check)).toEqual(["credit-hold", "credit-limit"]);
+      expect(result.released === false && result.hardRules.map((check) => check.check)).toEqual([
+        "credit-hold",
+        "credit-limit",
+      ]);
       expect(await proposalNow(proposal.id)).toMatchObject({ status: "open", soNumber: null });
       expect(await available("HPS-1408")).toBe(30);
       const events = await personEvents("E007");
@@ -233,20 +296,37 @@ describe("reviewing a Proposal", () => {
       const db = testDatabase.db;
       const proposal = await proposalFor("E007", e007Script());
 
-      await expect(setProposalAside(db, { proposalId: proposal.id, userId, kind: "hold", reason: "   ", at: AT })).rejects.toBeInstanceOf(
-        ReviewRefused,
-      );
-      await setProposalAside(db, { proposalId: proposal.id, userId, kind: "hold", reason: "Waiting for accounts to call back.", at: AT });
+      await expect(
+        setProposalAside(db, { proposalId: proposal.id, userId, kind: "hold", reason: "   ", at: AT }),
+      ).rejects.toBeInstanceOf(ReviewRefused);
+      await setProposalAside(db, {
+        proposalId: proposal.id,
+        userId,
+        kind: "hold",
+        reason: "Waiting for accounts to call back.",
+        at: AT,
+      });
       expect(await proposalNow(proposal.id)).toMatchObject({
         status: "held",
         decidedBy: userId,
         decisionReason: "Waiting for accounts to call back.",
       });
 
-      await setProposalAside(db, { proposalId: proposal.id, userId, kind: "reject", reason: "Accounts won't lift the hold.", at: later(1) });
-      expect(await proposalNow(proposal.id)).toMatchObject({ status: "rejected", decisionReason: "Accounts won't lift the hold." });
+      await setProposalAside(db, {
+        proposalId: proposal.id,
+        userId,
+        kind: "reject",
+        reason: "Accounts won't lift the hold.",
+        at: later(1),
+      });
+      expect(await proposalNow(proposal.id)).toMatchObject({
+        status: "rejected",
+        decisionReason: "Accounts won't lift the hold.",
+      });
 
-      await expect(approveProposal(db, { proposalId: proposal.id, userId, notes: {}, at: later(2) })).rejects.toBeInstanceOf(ReviewRefused);
+      await expect(
+        approveProposal(db, { proposalId: proposal.id, userId, notes: {}, at: later(2) }),
+      ).rejects.toBeInstanceOf(ReviewRefused);
       const events = await personEvents("E007");
       expect(events.map((event) => [event.action, event.detail.reason])).toEqual([
         ["proposal.held", "Waiting for accounts to call back."],
@@ -270,7 +350,11 @@ describe("reviewing a Proposal", () => {
 
       expect(result).toMatchObject({ released: true, totalCents: 14100, customerName: "Maple Leaf Bakery" });
       const soNumber = result.released ? result.soNumber : "";
-      const lines = await db.select().from(salesOrderLines).where(eq(salesOrderLines.soNumber, soNumber)).orderBy(asc(salesOrderLines.lineNo));
+      const lines = await db
+        .select()
+        .from(salesOrderLines)
+        .where(eq(salesOrderLines.soNumber, soNumber))
+        .orderBy(asc(salesOrderLines.lineNo));
       expect(lines.map(({ sku, qtyOrdered, unitPriceCents }) => [sku, qtyOrdered, unitPriceCents])).toEqual([
         ["HPS-1502", 3, 3300],
         ["HPS-1501", 2, 2100],
@@ -286,8 +370,12 @@ describe("reviewing a Proposal", () => {
 
       const [reply] = await db.select().from(draftReplies).where(eq(draftReplies.emailId, "E012"));
       expect(reply).toMatchObject({ body, readyBy: userId, readyAt: AT });
-      await expect(markReplyReady(db, { emailId: "E012", userId, body: "changed", at: later(1) })).rejects.toBeInstanceOf(ReviewRefused);
-      expect((await personEvents("E012")).map((event) => [event.action, event.detail.edited])).toEqual([["reply.ready", true]]);
+      await expect(
+        markReplyReady(db, { emailId: "E012", userId, body: "changed", at: later(1) }),
+      ).rejects.toBeInstanceOf(ReviewRefused);
+      expect((await personEvents("E012")).map((event) => [event.action, event.detail.edited])).toEqual([
+        ["reply.ready", true],
+      ]);
     });
   });
 

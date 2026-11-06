@@ -14,6 +14,7 @@ import {
 import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
 import { ProposalPane } from "./proposal-pane";
+import { ReviewDeskProvider } from "./review-desk";
 
 const INBOX_PATH = "/";
 
@@ -42,25 +43,32 @@ const FILTER_NAMES: Record<InboxFilter, string> = {
 export function InboxDesk({ query, emails, counts, shown, selected, work, tipDismissed }: InboxDeskProps) {
   return (
     <AgentRunsProvider>
-      <div className="desk" data-view={query.view}>
-        <section className="desk-pane desk-pane--list" aria-label="Emails">
-          <GreetingCard emails={emails} />
-          {tipDismissed ? null : <TipCard />}
-          <FilterBar query={query} counts={counts} />
-          <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
-        </section>
-        <div className="desk-back">
-          <Link className="btn btn--ghost" href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}>
-            ← All emails
-          </Link>
+      <ReviewDeskProvider
+        filter={query.filter}
+        view={query.view}
+        shownIds={shown.map((email) => email.emailId)}
+        selectedId={selected?.emailId ?? null}
+      >
+        <div className="desk" data-view={query.view}>
+          <section className="desk-pane desk-pane--list" aria-label="Emails">
+            <GreetingCard emails={emails} />
+            {tipDismissed ? null : <TipCard />}
+            <FilterBar query={query} counts={counts} />
+            <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
+          </section>
+          <div className="desk-back">
+            <Link className="btn btn--ghost" href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}>
+              ← All emails
+            </Link>
+          </div>
+          <section className="desk-pane desk-pane--email" aria-label="Email">
+            {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
+          </section>
+          <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
+            <ProposalPane email={selected} work={work} />
+          </section>
         </div>
-        <section className="desk-pane desk-pane--email" aria-label="Email">
-          {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
-        </section>
-        <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
-          <ProposalPane email={selected} work={work} />
-        </section>
-      </div>
+      </ReviewDeskProvider>
     </AgentRunsProvider>
   );
 }

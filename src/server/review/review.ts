@@ -93,7 +93,10 @@ async function recheck(tx: Database, { proposal, senderEmail, orderDate }: Propo
       .set({ unitPriceCents: line.price?.unitPriceCents ?? null, priceSource: line.price?.source ?? null })
       .where(and(eq(proposalLines.proposalId, proposal.id), eq(proposalLines.lineNo, storedLine.lineNo)));
   }
-  await tx.update(proposals).set({ checks: checked.checks, totalCents: checked.totalCents }).where(eq(proposals.id, proposal.id));
+  await tx
+    .update(proposals)
+    .set({ checks: checked.checks, totalCents: checked.totalCents })
+    .where(eq(proposals.id, proposal.id));
   const failing = checked.checks.filter((check) => !check.passes);
   await recordAudit(tx, {
     at,
@@ -113,7 +116,7 @@ async function recheck(tx: Database, { proposal, senderEmail, orderDate }: Propo
 }
 
 export type ApproveResult =
-  | { released: true; soNumber: string; totalCents: number; customerName: string }
+  | { released: true; emailId: string; soNumber: string; totalCents: number; customerName: string }
   | { released: false; hardRules: RecordedCheck[]; missingNotes: string[] };
 
 // Approve & release: the checks re-run first. A failing hard rule refuses the approval, whatever
@@ -130,7 +133,9 @@ export async function approveProposal(
 
     const hardRules = checked.failing.filter((check) => isHardRule(check.check));
     const overrides = checked.failing.filter((check) => !isHardRule(check.check));
-    const missingNotes = overrides.filter((check) => !decisionNote.safeParse(decision.notes[check.check] ?? "").success).map((check) => check.check);
+    const missingNotes = overrides
+      .filter((check) => !decisionNote.safeParse(decision.notes[check.check] ?? "").success)
+      .map((check) => check.check);
     if (hardRules.length > 0 || missingNotes.length > 0) {
       await recordAudit(tx, {
         ...audit,
@@ -146,7 +151,12 @@ export async function approveProposal(
         ...audit,
         actor: "person",
         action: "proposal.override",
-        detail: { proposalId: proposal.id, check: check.check, failing: check.detail, note: decisionNote.parse(decision.notes[check.check]) },
+        detail: {
+          proposalId: proposal.id,
+          check: check.check,
+          failing: check.detail,
+          note: decisionNote.parse(decision.notes[check.check]),
+        },
       });
     }
     const soNumber = await releaseOrder(tx, {
@@ -174,8 +184,17 @@ export async function approveProposal(
         allocated: checked.lines.map((line) => ({ sku: line.sku, quantity: line.quantity })),
       },
     });
-    const [customer] = await tx.select({ name: customers.name }).from(customers).where(eq(customers.customerId, proposal.customerId));
-    return { released: true, soNumber, totalCents: checked.totalCents, customerName: customer?.name ?? proposal.customerId };
+    const [customer] = await tx
+      .select({ name: customers.name })
+      .from(customers)
+      .where(eq(customers.customerId, proposal.customerId));
+    return {
+      released: true,
+      emailId: proposal.emailId,
+      soNumber,
+      totalCents: checked.totalCents,
+      customerName: customer?.name ?? proposal.customerId,
+    };
   });
 }
 
@@ -183,12 +202,16 @@ export type SetAsideKind = "reject" | "hold";
 
 // Reject… and Put on hold… each need a reason, which is kept on the Proposal and in the audit log.
 // Either is open to a hard-rule Proposal; rejecting a held one is allowed, holding it again is not.
-export async function setProposalAside(db: Database, decision: Decision & { kind: SetAsideKind; reason: string }): Promise<void> {
+export async function setProposalAside(
+  db: Database,
+  decision: Decision & { kind: SetAsideKind; reason: string },
+): Promise<{ emailId: string }> {
   const parsed = decisionNote.safeParse(decision.reason);
   if (!parsed.success) throw new ReviewRefused("Add a short note so the team knows why.");
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const { proposal } = await decidableProposal(tx, decision.proposalId);
-    if (decision.kind === "hold" && proposal.status === "held") throw new ReviewRefused("This Proposal is already on hold.");
+    if (decision.kind === "hold" && proposal.status === "held")
+      throw new ReviewRefused("This Proposal is already on hold.");
     const status = decision.kind === "reject" ? "rejected" : "held";
     await tx
       .update(proposals)
@@ -203,12 +226,13 @@ export async function setProposalAside(db: Database, decision: Decision & { kind
       runId: proposal.runId,
       detail: { proposalId: proposal.id, reason: parsed.data },
     });
+    return { emailId: proposal.emailId };
   });
 }
 
 // Undo, within 10 seconds of approving and only by the person who approved: the sales order is
 // withdrawn, its stock returned, and the Proposal is open again. After that the release is final.
-export async function undoRelease(db: Database, decision: Decision): Promise<{ soNumber: string }> {
+export async function undoRelease(db: Database, decision: Decision): Promise<{ soNumber: string; emailId: string }> {
   return db.transaction(async (tx) => {
     await lockReleases(tx);
     const [proposal] = await tx.select().from(proposals).where(eq(proposals.id, decision.proposalId));
@@ -236,7 +260,7 @@ export async function undoRelease(db: Database, decision: Decision): Promise<{ s
       runId: proposal.runId,
       detail: { proposalId: proposal.id, soNumber, returned },
     });
-    return { soNumber };
+    return { soNumber, emailId: proposal.emailId };
   });
 }
 
@@ -257,7 +281,10 @@ export const proposalEdit = z.discriminatedUnion("kind", [
 export type ProposalEdit = z.infer<typeof proposalEdit>;
 
 // Applies one edit, records it, and re-runs the checks at once. It never releases: only Approve does.
-export async function editProposal(db: Database, decision: Decision & { edit: ProposalEdit }): Promise<RecordedCheck[]> {
+export async function editProposal(
+  db: Database,
+  decision: Decision & { edit: ProposalEdit },
+): Promise<RecordedCheck[]> {
   const edit = proposalEdit.parse(decision.edit);
   return db.transaction(async (tx) => {
     const underReview = await decidableProposal(tx, decision.proposalId);
@@ -279,7 +306,11 @@ export async function editProposal(db: Database, decision: Decision & { edit: Pr
 
 // Returns what the edit replaced, for the audit log.
 async function applyEdit(tx: Database, proposal: ProposalRow, edit: ProposalEdit): Promise<unknown> {
-  const lines = await tx.select().from(proposalLines).where(eq(proposalLines.proposalId, proposal.id)).orderBy(asc(proposalLines.lineNo));
+  const lines = await tx
+    .select()
+    .from(proposalLines)
+    .where(eq(proposalLines.proposalId, proposal.id))
+    .orderBy(asc(proposalLines.lineNo));
   const thisLine = (wanted: number) => and(eq(proposalLines.proposalId, proposal.id), eq(proposalLines.lineNo, wanted));
   const findLine = (wanted: number) => {
     const line = lines.find((candidate) => candidate.lineNo === wanted);
@@ -339,12 +370,20 @@ async function requireProduct(tx: Database, wanted: string): Promise<void> {
 }
 
 // "Mark reply ready": the person's final text is kept and locked, with who and when. It is never sent.
-export async function markReplyReady(db: Database, decision: { emailId: string; userId: number; body: string; at: Date }): Promise<void> {
+export async function markReplyReady(
+  db: Database,
+  decision: { emailId: string; userId: number; body: string; at: Date },
+): Promise<void> {
   const body = z.string().trim().min(1).max(5000).safeParse(decision.body);
   if (!body.success) throw new ReviewRefused("The reply is empty. Write what would go out first.");
   await db.transaction(async (tx) => {
     const [reply] = await tx
-      .select({ id: draftReplies.id, runId: draftReplies.runId, body: draftReplies.body, readyAt: draftReplies.readyAt })
+      .select({
+        id: draftReplies.id,
+        runId: draftReplies.runId,
+        body: draftReplies.body,
+        readyAt: draftReplies.readyAt,
+      })
       .from(draftReplies)
       .innerJoin(agentRuns, eq(agentRuns.runId, draftReplies.runId))
       .where(eq(draftReplies.emailId, decision.emailId))
@@ -381,7 +420,12 @@ export async function searchProducts(db: Database, query: string): Promise<Produ
   if (words.length === 0) return [];
   const pattern = `%${words.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
   return db
-    .select({ sku: products.sku, name: products.name, status: products.status, listPriceCents: products.listPriceCents })
+    .select({
+      sku: products.sku,
+      name: products.name,
+      status: products.status,
+      listPriceCents: products.listPriceCents,
+    })
     .from(products)
     .where(or(ilike(products.sku, pattern), ilike(products.name, pattern)))
     .orderBy(sql`${products.status} = 'DISCONTINUED'`, asc(products.sku))

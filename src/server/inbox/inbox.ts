@@ -1,11 +1,21 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
-import { agentRuns, emails, users, type AgentRunOutcome } from "@/db/schema";
+import { agentRuns, emails, proposals, users, type AgentRunOutcome, type ProposalStatus } from "@/db/schema";
 
-// Where an email stands on the desk, from its latest Agent run. Later tickets add the statuses
-// a person's decision produces.
-export const inboxStatuses = ["not_run", "reading", "released", "needs_you", "no_action", "failed"] as const;
+// Where an email stands on the desk, from its latest Agent run and a person's decisions on the
+// Proposals that run made.
+export const inboxStatuses = [
+  "not_run",
+  "reading",
+  "released",
+  "needs_you",
+  "no_action",
+  "failed",
+  "approved",
+  "rejected",
+  "on_hold",
+] as const;
 export type InboxStatus = (typeof inboxStatuses)[number];
 
 export const inboxFilters = ["all", "needs-you", "done", "other"] as const;
@@ -52,19 +62,30 @@ export async function findInboxEmail(db: Database, emailId: string): Promise<Inb
 }
 
 interface LatestRun {
+  runId: string;
   endedAt: Date | null;
   outcome: AgentRunOutcome | null;
+  proposalStatuses: ProposalStatus[];
 }
 
-// Each email's latest Agent run, newest first so the first one seen wins.
+// Each email's latest Agent run, newest first so the first one seen wins, with the statuses of
+// the Proposals it made.
 async function latestRuns(db: Database, emailId?: string): Promise<Map<string, LatestRun>> {
   const rows = await db
-    .select({ emailId: agentRuns.emailId, endedAt: agentRuns.endedAt, outcome: agentRuns.outcome })
+    .select({ runId: agentRuns.runId, emailId: agentRuns.emailId, endedAt: agentRuns.endedAt, outcome: agentRuns.outcome })
     .from(agentRuns)
     .where(emailId === undefined ? undefined : eq(agentRuns.emailId, emailId))
     .orderBy(desc(agentRuns.startedAt));
   const latest = new Map<string, LatestRun>();
-  for (const row of rows) if (!latest.has(row.emailId)) latest.set(row.emailId, row);
+  for (const row of rows) if (!latest.has(row.emailId)) latest.set(row.emailId, { ...row, proposalStatuses: [] });
+
+  const runIds = [...latest.values()].map((run) => run.runId);
+  const proposalRows =
+    runIds.length === 0
+      ? []
+      : await db.select({ runId: proposals.runId, status: proposals.status }).from(proposals).where(inArray(proposals.runId, runIds));
+  const byRun = new Map([...latest.values()].map((run) => [run.runId, run]));
+  for (const row of proposalRows) byRun.get(row.runId)?.proposalStatuses.push(row.status);
   return latest;
 }
 
@@ -75,6 +96,7 @@ function statusOf(run: LatestRun | undefined): InboxStatus {
     case "released":
       return "released";
     case "proposal":
+      return decisionStatus(run.proposalStatuses);
     case "routed":
       return "needs_you";
     case "no_action":
@@ -84,17 +106,30 @@ function statusOf(run: LatestRun | undefined): InboxStatus {
   }
 }
 
-// The filter an email of this status falls under, besides All.
+// An email waits for a person while any of its Proposals is open; a hold outranks a decision,
+// since something is still pending, and an approval outranks a rejection.
+function decisionStatus(statuses: ProposalStatus[]): InboxStatus {
+  if (statuses.length === 0 || statuses.includes("open")) return "needs_you";
+  if (statuses.includes("held")) return "on_hold";
+  if (statuses.includes("released")) return "approved";
+  return "rejected";
+}
+
+// The filter an email of this status falls under, besides All. A hold waits on something outside
+// the desk, so it is neither done nor waiting for you.
 function filterOf(status: InboxStatus): Exclude<InboxFilter, "all"> {
   switch (status) {
     case "released":
     case "no_action":
+    case "approved":
+    case "rejected":
       return "done";
     case "needs_you":
     case "failed":
       return "needs-you";
     case "not_run":
     case "reading":
+    case "on_hold":
       return "other";
   }
 }
@@ -102,6 +137,19 @@ function filterOf(status: InboxStatus): Exclude<InboxFilter, "all"> {
 // An email counts as handled once a run has finished with it and nothing is left for a person.
 export function isHandled(status: InboxStatus): boolean {
   return filterOf(status) === "done";
+}
+
+export function needsYou(status: InboxStatus): boolean {
+  return filterOf(status) === "needs-you";
+}
+
+// After a decision, the next email that needs you: the first one received after this one, else
+// the first of the day; null when nothing else needs you.
+export function nextNeedingYou(inbox: InboxEmail[], afterEmailId: string): string | null {
+  const waiting = inbox.filter((email) => needsYou(email.status) && email.emailId !== afterEmailId);
+  const position = inbox.findIndex((email) => email.emailId === afterEmailId);
+  const later = waiting.find((email) => inbox.indexOf(email) > position);
+  return (later ?? waiting[0])?.emailId ?? null;
 }
 
 export function isInFilter(email: InboxEmail, filter: InboxFilter): boolean {

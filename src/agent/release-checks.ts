@@ -18,7 +18,12 @@ export type ReleaseCheck = (typeof releaseChecks)[number];
 // not in the catalog and a ship-to that is not the customer's own cannot be released either: there
 // is no price or no address to release to, so a person fixes them by editing the line or the
 // ship-to instead.
-const HARD_RULES: ReadonlySet<string> = new Set<ReleaseCheck>(["skus-sellable", "credit-hold", "credit-limit", "ship-to"]);
+const HARD_RULES: ReadonlySet<string> = new Set<ReleaseCheck>([
+  "skus-sellable",
+  "credit-hold",
+  "credit-limit",
+  "ship-to",
+]);
 
 export function isHardRule(check: string): boolean {
   return HARD_RULES.has(check);
