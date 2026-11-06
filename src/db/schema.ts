@@ -241,6 +241,10 @@ export interface RecordedCheck {
   check: string;
   passes: boolean;
   detail: string;
+  // The review reasons a failing check stands for, e.g. `P2-short-stock` and `DATE-unmeetable`.
+  flags?: string[];
+  // What a person can do about it, e.g. a partial shipment, a backorder or declining.
+  choices?: string[];
 }
 
 // A new order the agent proposed. The gate either released it (`so_number` set) or left it open
@@ -262,6 +266,10 @@ export const proposals = pgTable(
     shipToId: text("ship_to_id").notNull(),
     customerPo: text("customer_po"),
     requestedDate: date("requested_date").notNull(),
+    // The customer's own words for the date, when they gave any (U11).
+    requestedDateWords: text("requested_date_words"),
+    // The other date ambiguous words could mean, e.g. "next Tuesday": 3 or 10 Nov.
+    requestedDateAlternative: date("requested_date_alternative"),
     totalCents: integer("total_cents").notNull(),
     status: text("status", { enum: proposalStatuses }).notNull(),
     checks: jsonb("checks").$type<RecordedCheck[]>().notNull(),
@@ -289,6 +297,8 @@ export const proposalLines = pgTable(
     priceSource: text("price_source", { enum: ["contract", "list"] }),
     statedPriceCents: integer("stated_price_cents"),
     customerWords: text("customer_words"),
+    // The earlier sales order a line repeats ("same as last time", "the usual").
+    fromSalesOrder: text("from_sales_order"),
   },
   (table) => [primaryKey({ columns: [table.proposalId, table.lineNo] })],
 );

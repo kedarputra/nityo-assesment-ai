@@ -5,6 +5,7 @@ import {
   customerContacts,
   customerPrices,
   customers,
+  incomingSupply,
   inventory,
   products,
   proposalLines,
@@ -15,8 +16,11 @@ import {
   type GateVerdict,
   type RecordedCheck,
 } from "@/db/schema";
+import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
-import { creditCheck, orderValue, priceFor, sellability, type Price } from "@/rules/business-rules";
+import { creditCheck, orderValue, priceFor, sellability, stockFor, type Price, type Stock } from "@/rules/business-rules";
+import { resolveRequestedDate } from "@/rules/requested-date";
+import { shortStock, type ShortStock, type ShortStockChoice } from "@/rules/short-stock";
 import { recordAudit } from "./audit";
 import { ToolError } from "./tool-error";
 
@@ -30,6 +34,8 @@ export const releaseChecks = [
   "skus-sellable",
   "system-price",
   "full-stock",
+  "requested-date",
+  "from-history",
   "credit-hold",
   "credit-limit",
   "ship-to",
@@ -43,12 +49,16 @@ export interface ProposedLine {
   // A price the email or the model named, per selling unit; compared with the system's price.
   statedUnitPriceCents: number | null;
   customerWords: string | null;
+  // The earlier sales order this line repeats, for "same as last time" and "the usual".
+  fromSalesOrder: string | null;
 }
 
 export interface ProposedNewOrder {
   customerId: string;
   shipToId: string;
+  // The model's reading of the date; the customer's words, when given, are read by code instead.
   requestedDate: string;
+  requestedDateWords: string | null;
   customerPo: string | null;
   lines: ProposedLine[];
 }
@@ -65,6 +75,8 @@ export interface GateResult {
   proposalId: number;
   verdict: GateVerdict;
   soNumber: string | null;
+  requestedDate: string;
+  requestedDateAlternative: string | null;
   totalCents: number;
   checks: RecordedCheck[];
 }
@@ -72,7 +84,8 @@ export interface GateResult {
 interface PricedLine extends ProposedLine {
   price: Price | null;
   sellable: boolean;
-  available: number | null;
+  // Null when the SKU is not in the catalog.
+  stock: Stock | null;
 }
 
 // Releases are serialised, so two runs never allocate the same stock or take the same SO number.
@@ -87,6 +100,8 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
   if (!customer) throw new ToolError(`There is no customer ${order.customerId}.`);
 
   const lines = await priceLines(tx, order, context.orderDate);
+  await confirmHistory(tx, order);
+  const requested = readRequestedDate(order, context.orderDate);
   const pricedLines = lines.flatMap((line) =>
     line.price ? [{ sku: line.sku, quantity: line.quantity, unitPriceCents: line.price.unitPriceCents }] : [],
   );
@@ -108,6 +123,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
   const checks = evaluate({
     knownContact: contacts.some((contact) => normaliseAddress(contact.email) === sender),
     lines,
+    requested,
     credit,
     shipToIsTheCustomers: shipTo !== undefined,
     flagCodes: flags.map((flag) => flag.code),
@@ -122,7 +138,9 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       customerId: customer.customerId,
       shipToId: order.shipToId,
       customerPo: order.customerPo,
-      requestedDate: order.requestedDate,
+      requestedDate: requested.date,
+      requestedDateWords: order.requestedDateWords,
+      requestedDateAlternative: requested.alternative,
       totalCents,
       status: "open",
       checks,
@@ -139,6 +157,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       priceSource: line.price?.source ?? null,
       statedPriceCents: line.statedUnitPriceCents,
       customerWords: line.customerWords,
+      fromSalesOrder: line.fromSalesOrder,
     })),
   );
 
@@ -150,13 +169,14 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
     detail: { proposalId: proposal.id, verdict, totalCents, failing: checks.filter((result) => !result.passes) },
   });
 
+  const dates = { requestedDate: requested.date, requestedDateAlternative: requested.alternative };
   if (verdict === "review") {
-    return { proposalId: proposal.id, verdict, soNumber: null, totalCents, checks };
+    return { proposalId: proposal.id, verdict, soNumber: null, ...dates, totalCents, checks };
   }
 
   const soNumber = await release(tx, {
     proposalId: proposal.id,
-    order,
+    order: { ...order, requestedDate: requested.date },
     orderDate: context.orderDate,
     lines: lines.flatMap((line) => (line.price ? [{ ...line, unitPriceCents: line.price.unitPriceCents }] : [])),
   });
@@ -173,7 +193,7 @@ export async function proposeNewOrder(tx: Database, context: GateContext, order:
       allocated: lines.map((line) => ({ sku: line.sku, quantity: line.quantity })),
     },
   });
-  return { proposalId: proposal.id, verdict, soNumber, totalCents, checks };
+  return { proposalId: proposal.id, verdict, soNumber, ...dates, totalCents, checks };
 }
 
 async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: string): Promise<PricedLine[]> {
@@ -187,18 +207,104 @@ async function priceLines(tx: Database, order: ProposedNewOrder, orderDate: stri
     .select({ sku: inventory.sku, available: inventory.available })
     .from(inventory)
     .where(inArray(inventory.sku, skus));
+  const incoming = await tx.select().from(incomingSupply).where(inArray(incomingSupply.sku, skus));
 
   return order.lines.map((line) => {
     const product = productRows.find((row) => row.sku === line.sku);
-    if (!product) return { ...line, price: null, sellable: false, available: null };
+    if (!product) return { ...line, price: null, sellable: false, stock: null };
     const price = priceFor({ customerId: order.customerId, orderDate, product, contracts });
     return {
       ...line,
       price,
       sellable: sellability({ product }).sellable,
-      available: stockRows.find((row) => row.sku === line.sku)?.available ?? 0,
+      stock: stockFor({
+        sku: line.sku,
+        available: stockRows.find((row) => row.sku === line.sku)?.available ?? 0,
+        incoming,
+      }),
     };
   });
+}
+
+// A line that says it repeats an earlier order must name one of this customer's orders that has
+// the SKU; anything else is the model's mistake to correct, not a Proposal to store.
+async function confirmHistory(tx: Database, order: ProposedNewOrder): Promise<void> {
+  const cited = [...new Set(order.lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
+  if (cited.length === 0) return;
+  const history = await tx
+    .select({ soNumber: salesOrders.soNumber, sku: salesOrderLines.sku })
+    .from(salesOrders)
+    .innerJoin(salesOrderLines, eq(salesOrderLines.soNumber, salesOrders.soNumber))
+    .where(and(eq(salesOrders.customerId, order.customerId), inArray(salesOrders.soNumber, cited)));
+  for (const line of order.lines) {
+    if (line.fromSalesOrder === null) continue;
+    if (!history.some((row) => row.soNumber === line.fromSalesOrder && row.sku === line.sku)) {
+      throw new ToolError(`${line.fromSalesOrder} is not one of ${order.customerId}'s orders with ${line.sku}.`);
+    }
+  }
+}
+
+interface ReadDate {
+  date: string;
+  alternative: string | null;
+  // The date the customer asked for, when they named one; only that date can be missed.
+  customerDate: string | null;
+  result: Omit<RecordedCheck, "check">;
+}
+
+// The customer's words win over the model's reading of them (U11); a past date (policy 12) or
+// words that could mean two days go to a person.
+function readRequestedDate(order: ProposedNewOrder, orderDate: string): ReadDate {
+  const words = order.requestedDateWords;
+  if (words === null) {
+    const past = order.requestedDate < orderDate;
+    return {
+      date: order.requestedDate,
+      alternative: null,
+      customerDate: null,
+      result: past
+        ? { passes: false, detail: `${day(order.requestedDate)} has already passed.`, flags: ["P12-past-date"] }
+        : { passes: true, detail: `Wanted ${day(order.requestedDate)}; the email names no date.` },
+    };
+  }
+
+  const resolved = resolveRequestedDate(words, orderDate);
+  switch (resolved.kind) {
+    case "on":
+      return {
+        date: resolved.date,
+        alternative: null,
+        customerDate: resolved.date,
+        result: resolved.past
+          ? {
+              passes: false,
+              detail: `“${words}” is ${day(resolved.date)}, which has already passed; ask for a new date.`,
+              flags: ["P12-past-date"],
+            }
+          : { passes: true, detail: `“${words}” is ${day(resolved.date)}.` },
+      };
+    case "ambiguous": {
+      const [first, second] = resolved.dates;
+      const date = order.requestedDate === second ? second : first;
+      return {
+        date,
+        alternative: date === first ? second : first,
+        customerDate: date,
+        result: { passes: false, detail: `${resolved.reason}; ask the customer which.`, flags: ["DATE-ambiguous"] },
+      };
+    }
+    case "unreadable":
+      return {
+        date: order.requestedDate,
+        alternative: null,
+        customerDate: order.requestedDate,
+        result: {
+          passes: false,
+          detail: `“${words}” is not a date the system can read; the agent took it as ${day(order.requestedDate)}. Confirm it with the customer.`,
+          flags: ["DATE-ambiguous"],
+        },
+      };
+  }
 }
 
 // What this customer's orders released earlier today add to their exposure (ticket 09 of the map:
@@ -214,6 +320,7 @@ export async function releasedTodayFor(tx: Database, customerId: string): Promis
 interface GateFacts {
   knownContact: boolean;
   lines: PricedLine[];
+  requested: ReadDate;
   credit: ReturnType<typeof creditCheck>;
   shipToIsTheCustomers: boolean;
   flagCodes: string[];
@@ -225,7 +332,7 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
   const priceMismatches = lines.filter(
     (line) => line.statedUnitPriceCents !== null && line.statedUnitPriceCents !== line.price?.unitPriceCents,
   );
-  const short = shortLines(lines);
+  const repeated = [...new Set(lines.flatMap((line) => (line.fromSalesOrder ? [line.fromSalesOrder] : [])))];
 
   const results: Record<ReleaseCheck, Omit<RecordedCheck, "check">> = {
     "known-contact": facts.knownContact
@@ -240,14 +347,19 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
         ? { passes: true, detail: "Every line is at the system's price." }
         : {
             passes: false,
-            detail: `A stated price differs from the system's: ${priceMismatches
-              .map((line) => `${line.sku} stated ${formatUsd(line.statedUnitPriceCents ?? 0)}, system ${line.price ? formatUsd(line.price.unitPriceCents) : "none"}`)
-              .join("; ")}.`,
+            detail: `The order keeps the system's price; the email's differs: ${priceMismatches.map(describePriceDifference).join("; ")}.`,
+            flags: ["P4-price-differs"],
           },
-    "full-stock":
-      short.length === 0
-        ? { passes: true, detail: "Every line is fully in stock." }
-        : { passes: false, detail: `Not enough available: ${short.join("; ")}.` },
+    "full-stock": stockResult(lines, facts.requested.customerDate),
+    "requested-date": facts.requested.result,
+    "from-history":
+      repeated.length === 0
+        ? { passes: true, detail: "Every line is one the customer wrote out." }
+        : {
+            passes: false,
+            detail: `Lines rebuilt from ${repeated.join(", ")}; the customer confirms them.`,
+            flags: ["P8-from-history"],
+          },
     "credit-hold": credit.status.passes
       ? { passes: true, detail: "The customer is not on credit hold." }
       : { passes: false, detail: "The customer is on CREDIT_HOLD." },
@@ -271,17 +383,72 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
   return releaseChecks.map((check) => ({ check, ...results[check] }));
 }
 
-// A SKU on several lines needs all of them covered.
-function shortLines(lines: PricedLine[]): string[] {
-  const wanted = new Map<string, { quantity: number; available: number | null }>();
-  for (const line of lines) {
-    const entry = wanted.get(line.sku) ?? { quantity: 0, available: line.available };
-    entry.quantity += line.quantity;
-    wanted.set(line.sku, entry);
+function describePriceDifference(line: PricedLine): string {
+  const stated = `${line.sku} stated ${formatUsd(line.statedUnitPriceCents ?? 0)}`;
+  if (!line.price) return `${stated}, but it has no system price`;
+  const system = `${stated}, system ${formatUsd(line.price.unitPriceCents)} (${line.price.source})`;
+  const lapsed = line.price.source === "list" ? line.price.expiredContract : null;
+  // E024: the customer remembers a contract that has since ended.
+  return lapsed ? `${system}; the ${formatUsd(lapsed.unitPriceCents)} contract ended ${day(lapsed.validTo)}` : system;
+}
+
+// Short stock is never released (policy 2): the check shows what is available and due in, and
+// what a person can choose. A date the stock cannot meet is flagged and adds declining (U10).
+function stockResult(lines: PricedLine[], customerDate: string | null): Omit<RecordedCheck, "check"> {
+  const notInCatalog: string[] = [];
+  const short: ShortStock[] = [];
+  for (const [sku, wanted] of wantedBySku(lines)) {
+    const stock = lines.find((line) => line.sku === sku)?.stock ?? null;
+    if (stock === null) notInCatalog.push(sku);
+    else if (wanted > stock.available) short.push(shortStock({ wanted, stock, requestedDate: customerDate }));
   }
-  return [...wanted]
-    .filter(([, entry]) => entry.available === null || entry.quantity > entry.available)
-    .map(([sku, entry]) => `${sku} wants ${entry.quantity}, ${entry.available ?? 0} available`);
+  if (notInCatalog.length === 0 && short.length === 0) return { passes: true, detail: "Every line is fully in stock." };
+
+  const details = [
+    ...short.map((line) => describeShortStock(line, customerDate)),
+    ...notInCatalog.map((sku) => `${sku} is not in the catalog, so it has no stock`),
+  ];
+  const flags = short.length > 0 ? ["P2-short-stock"] : [];
+  if (short.some((line) => line.dateUnmeetable)) flags.push("DATE-unmeetable");
+  const choices = short.flatMap((line) =>
+    line.choices.filter((choice) => choice.kind !== "decline").map((choice) => `${line.sku}: ${describeChoice(choice, line)}`),
+  );
+  if (short.some((line) => line.choices.some((choice) => choice.kind === "decline"))) choices.push("Decline the order");
+  return { passes: false, detail: `Not enough available: ${details.join("; ")}.`, flags, choices };
+}
+
+// A SKU on several lines needs all of them covered.
+function wantedBySku(lines: PricedLine[]): Map<string, number> {
+  const wanted = new Map<string, number>();
+  for (const line of lines) wanted.set(line.sku, (wanted.get(line.sku) ?? 0) + line.quantity);
+  return wanted;
+}
+
+function describeShortStock(line: ShortStock, customerDate: string | null): string {
+  const incoming =
+    line.incoming.length === 0
+      ? "none due in"
+      : line.incoming.map((delivery) => `${delivery.qty} due ${day(delivery.expectedDate)} (${delivery.supplierPo})`).join(", ");
+  const text = `${line.sku} wants ${line.wanted}, ${line.available} available, ${incoming}`;
+  if (!line.dateUnmeetable || customerDate === null) return text;
+  const earliest = line.fullBy ? `not before ${day(line.fullBy)}` : "not with what is due in";
+  return `${text}; all ${line.wanted} can arrive ${earliest}, after the requested ${day(customerDate)}`;
+}
+
+function describeChoice(choice: Exclude<ShortStockChoice, { kind: "decline" }>, line: ShortStock): string {
+  switch (choice.kind) {
+    case "partial":
+      return choice.laterBy
+        ? `ship ${choice.now} now and the other ${choice.later} from ${day(choice.laterBy)}`
+        : `ship ${choice.now} now; nothing due in covers the other ${choice.later}`;
+    case "backorder":
+      return `backorder all ${line.wanted} for ${day(choice.by)}`;
+  }
+}
+
+// "Fri 6 Nov"; a calendar day read at noon at Harbor Point stays on that day.
+function day(isoDate: string): string {
+  return formatBusinessDay(new Date(`${isoDate}T12:00:00-05:00`));
 }
 
 interface Release {

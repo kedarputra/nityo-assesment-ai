@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import type { ToolDefinition } from "@/model/model";
 import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
+import { usualOrder } from "@/rules/order-history";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
 import { ToolError } from "./tool-error";
 
@@ -196,6 +197,32 @@ const getOrders = tool({
   },
 });
 
+const getUsualOrder = tool({
+  name: "get_usual_order",
+  description:
+    "What \"same as last time\" and \"the usual\" mean for a customer, worked out from their recent sales orders: the latest order's lines, the lines common to the recent orders (the usual), and the lines on only some of them, to offer in the reply rather than add.",
+  input: z.strictObject({ customer_id: customerId }),
+  async run(tx, _context, input) {
+    const orders = await tx
+      .select({ soNumber: salesOrders.soNumber, orderDate: salesOrders.orderDate })
+      .from(salesOrders)
+      .where(eq(salesOrders.customerId, input.customer_id));
+    const lines =
+      orders.length === 0
+        ? []
+        : await tx
+            .select({ soNumber: salesOrderLines.soNumber, sku: salesOrderLines.sku, qtyOrdered: salesOrderLines.qtyOrdered })
+            .from(salesOrderLines)
+            .where(
+              inArray(
+                salesOrderLines.soNumber,
+                orders.map((order) => order.soNumber),
+              ),
+            );
+    return usualOrder(orders.map((order) => ({ ...order, lines: lines.filter((line) => line.soNumber === order.soNumber) })));
+  },
+});
+
 const proposeNewOrderTool = tool({
   name: "propose_new_order",
   description:
@@ -203,7 +230,15 @@ const proposeNewOrderTool = tool({
   input: z.strictObject({
     customer_id: customerId,
     ship_to_id: z.string().min(1).max(20),
-    requested_date: z.iso.date().describe("The delivery date the customer asked for, YYYY-MM-DD."),
+    requested_date: z.iso
+      .date()
+      .describe("The delivery date the customer asked for, YYYY-MM-DD; when the email names none, the date you propose."),
+    requested_date_words: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("The email's own words for the date, verbatim (\"next Tuesday\", \"by Friday October 30\"). The system reads them itself."),
     customer_po: z.string().min(1).max(60).nullable().optional(),
     lines: z
       .array(
@@ -217,6 +252,12 @@ const proposeNewOrderTool = tool({
             .optional()
             .describe("Only if the email names a price per selling unit, in cents."),
           customer_words: z.string().max(200).optional().describe("How the customer wrote this line."),
+          from_sales_order: z
+            .string()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe("The earlier sales order this line repeats, when the email asks for the usual or the same as last time."),
         }),
       )
       .min(1)
@@ -236,12 +277,14 @@ const proposeNewOrderTool = tool({
         customerId: input.customer_id,
         shipToId: input.ship_to_id,
         requestedDate: input.requested_date,
+        requestedDateWords: input.requested_date_words ?? null,
         customerPo: input.customer_po ?? null,
         lines: input.lines.map((line) => ({
           sku: line.sku,
           quantity: line.quantity,
           statedUnitPriceCents: line.stated_unit_price_cents ?? null,
           customerWords: line.customer_words ?? null,
+          fromSalesOrder: line.from_sales_order ?? null,
         })),
       },
     );
@@ -249,6 +292,8 @@ const proposeNewOrderTool = tool({
       proposalId: result.proposalId,
       outcome: result.verdict === "released" ? `released as ${result.soNumber}` : "waiting for a person to review",
       soNumber: result.soNumber,
+      requestedDate: result.requestedDate,
+      requestedDateAlternative: result.requestedDateAlternative,
       totalCents: result.totalCents,
       failingChecks: result.checks.filter((check) => !check.passes),
     };
@@ -304,6 +349,7 @@ export const agentTools: readonly AgentTool[] = [
   checkStock,
   checkCredit,
   getOrders,
+  getUsualOrder,
   proposeNewOrderTool,
   draftReply,
   raiseFlag,

@@ -14,6 +14,7 @@ import { ScriptedModel, callsTool, repliesWith } from "@/model/scripted-model";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e001Lines, e001Script } from "@/test/e001-script";
+import { releaseChecks } from "./release-gate";
 import { AgentRunRefused, MAX_MODEL_CALLS, runAgent } from "./run-agent";
 
 const MODEL_ID = "claude-opus-5-5";
@@ -81,7 +82,7 @@ describe("an Agent run", () => {
     const [proposal] = await db.select().from(proposals).where(eq(proposals.runId, summary.runId));
     expect(proposal).toMatchObject({ status: "released", soNumber: "SO-24059", totalCents: 67200 });
     expect(proposal?.checks.every((check) => check.passes)).toBe(true);
-    expect(proposal?.checks).toHaveLength(8);
+    expect(proposal?.checks.map((check) => check.check)).toEqual([...releaseChecks]);
 
     const [reply] = await db.select().from(draftReplies).where(eq(draftReplies.runId, summary.runId));
     expect(reply?.body).toContain("SO-24059");
@@ -149,6 +150,7 @@ describe("an Agent run", () => {
       "check_stock",
       "check_credit",
       "get_orders",
+      "get_usual_order",
       "propose_new_order",
       "draft_reply",
       "raise_flag",
