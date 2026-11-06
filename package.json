@@ -17,7 +17,8 @@
     "sandcastle:list:json": "node .sandcastle/tracker.mjs list",
     "sandcastle:dry-run": "pnpm dlx tsx .sandcastle/main.mts --dry-run",
     "sandcastle:test": "node --test \".sandcastle/test/*.test.mjs\"",
-    "sandcastle:slack-test": "node .sandcastle/slack-test.mjs"
+    "sandcastle:slack-test": "node .sandcastle/slack-test.mjs",
+    "db:seed-users": "tsx scripts/seed-users.ts"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "^0.12.0",
