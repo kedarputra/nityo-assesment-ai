@@ -15,6 +15,9 @@ node_modules/
 
 .sandcastle/
 
+# `make eval` reports; what matters from them is copied into docs/results.md.
+/eval-reports/
+
 # macOS
 .DS_Store
 .gstack/
