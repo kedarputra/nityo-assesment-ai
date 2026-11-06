@@ -373,3 +373,417 @@ input::placeholder {
   gap: var(--s4);
   margin-top: var(--s3);
 }
+
+/* Type roles used by the desk */
+.headline {
+  font: 700 18px/1.35 var(--sans);
+  letter-spacing: -0.1px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header sections */
+nav.tabs {
+  display: flex;
+  gap: var(--s1);
+  align-self: stretch;
+}
+
+nav.tabs a {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s3);
+  color: var(--ink-muted);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+
+nav.tabs a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+@media (max-width: 767px) {
+  .top {
+    gap: var(--s3);
+  }
+
+  .wordmark span {
+    display: none;
+  }
+
+  nav.tabs a {
+    padding: 0 var(--s2);
+  }
+}
+
+/* Status pills and avatars: status is never colour alone, so every pill has an icon and words. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--r-pill);
+  padding: 3px 10px;
+  font: 600 13px/1.3 var(--sans);
+  white-space: nowrap;
+}
+
+.pill--not_run {
+  background: var(--sunken);
+  color: var(--ink-muted);
+}
+
+.av {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 13px var(--sans);
+  color: var(--ink);
+}
+
+.av--0 {
+  background: var(--av0);
+}
+
+.av--1 {
+  background: var(--av1);
+}
+
+.av--2 {
+  background: var(--av2);
+}
+
+.av--3 {
+  background: var(--av3);
+}
+
+.av--4 {
+  background: var(--av4);
+}
+
+/* The desk: phone first, then tablet, then three panes (DESIGN.md, "Layout and responsiveness") */
+.page:has(> .desk) {
+  padding: 0;
+}
+
+.desk-pane {
+  background: var(--surface);
+  min-width: 0;
+}
+
+.desk-pane--email,
+.desk-pane--proposal {
+  padding: var(--s4);
+}
+
+.desk-back {
+  padding: var(--s3) var(--s4) 0;
+  background: var(--surface);
+}
+
+.desk-back .btn {
+  text-decoration: none;
+}
+
+@media (max-width: 767px) {
+  .desk[data-view="list"] .desk-pane--email,
+  .desk[data-view="list"] .desk-pane--proposal,
+  .desk[data-view="list"] .desk-back,
+  .desk[data-view="detail"] .desk-pane--list {
+    display: none;
+  }
+
+  .desk-pane--proposal {
+    border-top: 1px solid var(--hairline);
+    padding-bottom: calc(var(--s5) + env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 768px) {
+  .desk {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    /* Spare height from the sticky list goes below the Proposal, never between the panes. */
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    gap: 12px;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .desk-back {
+    display: none;
+  }
+
+  .desk-pane {
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--card);
+  }
+
+  /* Tablet: the list keeps its place while the email and the Proposal scroll as one. */
+  .desk-pane--list {
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: calc(var(--header) + 12px);
+    max-height: calc(100dvh - var(--header) - 24px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .desk-pane--email,
+  .desk-pane--proposal {
+    grid-column: 2;
+    padding: var(--s5);
+  }
+}
+
+@media (min-width: 1200px) {
+  /* Desk: three card panes, each scrolling on its own. */
+  .desk {
+    grid-template-columns: 340px minmax(0, 1fr) 460px;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+    height: calc(100dvh - var(--header));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .desk-pane {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .desk-pane--list {
+    grid-row: auto;
+    position: static;
+    max-height: none;
+  }
+
+  .desk-pane--email {
+    grid-column: 2;
+    padding: var(--s5) var(--s6) var(--s6);
+  }
+
+  .desk-pane--proposal {
+    grid-column: 3;
+  }
+
+  .email-detail {
+    max-width: 720px;
+  }
+}
+
+/* The greeting and the tip, at the top of the list */
+.greeting-card {
+  padding: var(--s5) var(--s4) var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.greeting-count {
+  margin-top: var(--s1);
+  color: var(--ink-muted);
+}
+
+.progress {
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--sun-soft);
+  margin: var(--s3) 0 6px;
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--sun);
+  border-radius: inherit;
+  transition: width var(--base) var(--ease);
+}
+
+.tip {
+  margin: var(--s3) var(--s4) 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  font-size: 14px;
+  display: flex;
+  gap: var(--s3);
+  align-items: flex-start;
+}
+
+.tip p {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Filters wrap rather than truncate. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--s3) var(--s4);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.filter {
+  font: 600 14px var(--sans);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink-muted);
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .filter {
+    min-height: 44px;
+  }
+}
+
+.filter[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+
+.filter-count {
+  margin-left: 6px;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.list-empty {
+  margin: var(--s3) var(--s4) var(--s4);
+  padding: var(--s4);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--ink-muted);
+}
+
+/* Email rows: the whole row is one button, at least 64px tall. */
+ul.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--s2) var(--s3);
+}
+
+.row {
+  display: flex;
+  gap: var(--s3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--s3);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.row:hover {
+  background: var(--canvas);
+}
+
+.row[aria-current="true"] {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s2);
+  align-items: baseline;
+}
+
+.row-from,
+.row-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-from {
+  font-weight: 700;
+}
+
+.row-subject {
+  display: block;
+  margin: 1px 0 6px;
+}
+
+.row-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The email, always plain text */
+.email-head {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+}
+
+.email-head-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.email-body {
+  margin: var(--s3) 0 0;
+  padding: var(--s4) var(--s5);
+  background: var(--sunken);
+  border-radius: var(--r-lg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .email-body {
+    padding: var(--s4);
+  }
+}
+
+.pane-empty {
+  display: grid;
+  gap: var(--s2);
+  justify-items: start;
+}
+
+/* Pages with one column, such as the audit log */
+.narrow {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--s2);
+}
+
+.audit-empty {
+  margin-top: var(--s3);
+  display: grid;
+  gap: var(--s2);
+}

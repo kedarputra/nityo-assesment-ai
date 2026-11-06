@@ -1,5 +1,6 @@
 import type { SessionUser } from "@/server/auth/sessions";
 import { signOutAction } from "@/server/auth/actions";
+import { HeaderNav } from "./header-nav";
 
 export const MAIN_CONTENT_ID = "main";
 
@@ -17,6 +18,7 @@ export function SiteHeader({ user }: { user: SessionUser | null }) {
       <span className="wordmark" translate="no">
         Harbor Point <span>Order desk</span>
       </span>
+      {user ? <HeaderNav /> : null}
       {user ? (
         <span className="right">
           <span className="meta hide-phone">{user.username}</span>

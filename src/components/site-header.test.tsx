@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SiteHeader, SkipLink } from "./site-header";
+
+vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
 describe("SiteHeader", () => {
   it("shows the wordmark: Harbor Point, then Order desk", () => {
@@ -14,6 +16,13 @@ describe("SiteHeader", () => {
     const html = renderToStaticMarkup(<SiteHeader user={null} />);
 
     expect(html).not.toContain("Sign out");
+    expect(html).not.toContain("Audit log");
+  });
+
+  it("links the signed-in person to the inbox and the audit log", () => {
+    const html = renderToStaticMarkup(<SiteHeader user={{ id: 1, username: "ops.reviewer", role: "reviewer" }} />);
+
+    expect(html).toContain('<a aria-current="page" href="/">Inbox</a><a href="/audit">Audit log</a>');
   });
 
   it("names the signed-in person and offers a sign-out button", () => {
