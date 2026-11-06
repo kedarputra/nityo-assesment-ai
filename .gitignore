@@ -1,0 +1,16 @@
+node_modules/
+
+# Local secrets. Each has a committed `.env.example` beside it where one is needed.
+.env
+.env.*
+!.env.example
+
+# Worktrees of this repo live inside it (AGENTS.md, "Branches"). Sandcastle's own
+# are under .sandcastle/worktrees/, ignored by .sandcastle/.gitignore.
+/.worktrees/
+/.claude/worktrees/
+
+.vercel/
+
+# macOS
+.DS_Store

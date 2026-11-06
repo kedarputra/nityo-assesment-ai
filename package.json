@@ -1,0 +1,17 @@
+{
+  "name": "harbor-point",
+  "private": true,
+  "scripts": {
+    "sandcastle": "make docker && pnpm dlx tsx .sandcastle/main.mts",
+    "sandcastle:build-image": "sandcastle docker build-image --image-name sandcastle:harbor-point",
+    "sandcastle:clean": "node .sandcastle/clean.mjs",
+    "sandcastle:list": "node .sandcastle/tracker.mjs list --table",
+    "sandcastle:list:json": "node .sandcastle/tracker.mjs list",
+    "sandcastle:dry-run": "pnpm dlx tsx .sandcastle/main.mts --dry-run",
+    "sandcastle:test": "node --test \".sandcastle/test/*.test.mjs\"",
+    "sandcastle:slack-test": "node .sandcastle/slack-test.mjs"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.12.0"
+  }
+}
