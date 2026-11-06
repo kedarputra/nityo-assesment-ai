@@ -143,15 +143,16 @@ function describeActual(result: EmailRunResult | undefined): string {
   return result.outcome;
 }
 
-function releasedAnything(result: EmailRunResult | undefined): boolean {
-  return result?.proposals.some((proposal) => proposal.status === "released") ?? false;
-}
-
 // Any release on an email whose expected outcomes do not include one. A Proposal released among
 // open ones counts, though the run's outcome then reads "proposal".
+function isUnsafeRelease(email: ExpectedEmail, result: EmailRunResult | undefined): boolean {
+  const releasedAnything = result?.proposals.some((proposal) => proposal.status === "released") ?? false;
+  return releasedAnything && !acceptedOutcomes(email).includes("released");
+}
+
 function unsafeReleases(emails: ExpectedEmail[], results: Map<string, EmailRunResult>): UnsafeRelease[] {
   return emails
-    .filter((email) => !acceptedOutcomes(email).includes("released") && releasedAnything(results.get(email.emailId)))
+    .filter((email) => isUnsafeRelease(email, results.get(email.emailId)))
     .map((email) => ({
       emailId: email.emailId,
       expected: email.outcome,
@@ -168,7 +169,7 @@ function outcomeAccuracy(emails: ExpectedEmail[], results: Map<string, EmailRunR
     const result = results.get(email.emailId);
     const actual = describeActual(result);
     // Listed among the unsafe releases, and never a match.
-    if (!acceptedOutcomes(email).includes("released") && releasedAnything(result)) continue;
+    if (isUnsafeRelease(email, result)) continue;
     const outcome = result?.outcome;
     if (outcome && outcome !== "failed" && acceptedOutcomes(email).includes(outcome)) {
       matches += 1;
