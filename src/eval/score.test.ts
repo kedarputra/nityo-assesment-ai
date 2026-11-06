@@ -164,6 +164,15 @@ describe("scoring a run against the expected outcomes", () => {
     expect(score.reviewReasons.raised).toBe(score.reviewReasons.expected - 1);
   });
 
+  it("counts the gate's single-ship-to and known-contact checks as P7 and P5", () => {
+    const run = perfectRun(expected);
+    const e005 = proposalsOf(run, "E005").map((proposal) => ({ ...proposal, failingChecks: ["single-ship-to"] }));
+    const e013 = proposalsOf(run, "E013").map((proposal) => ({ ...proposal, failingChecks: ["known-contact"] }));
+    let spoiled = withEmail(run, "E005", { flags: [], proposals: e005 });
+    spoiled = withEmail(spoiled, "E013", { flags: [], proposals: e013 });
+    expect(scoreRun(expected, spoiled).reviewReasons.perEmail).toEqual([]);
+  });
+
   it("totals cost and time per email from the run records", () => {
     const score = scoreRun(expected, perfectRun(expected));
     expect(score.cost).toEqual({

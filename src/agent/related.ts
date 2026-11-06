@@ -95,8 +95,13 @@ export async function findRelatedWork(tx: Database, context: RelatedContext, cus
         outcome: runOutcome(run),
         proposals: proposalRows
           .filter((row) => row.runId === run?.runId)
-          .map(({ runId: _runId, ...proposal }) => ({
-            ...proposal,
+          .map((proposal) => ({
+            proposalId: proposal.proposalId,
+            status: proposal.status,
+            shipToId: proposal.shipToId,
+            customerPo: proposal.customerPo,
+            soNumber: proposal.soNumber,
+            totalCents: proposal.totalCents,
             lines: lineRows
               .filter((line) => line.proposalId === proposal.proposalId)
               .map(({ sku, quantity }) => ({ sku, quantity })),
