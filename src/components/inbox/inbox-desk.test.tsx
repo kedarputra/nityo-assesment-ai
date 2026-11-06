@@ -47,6 +47,7 @@ function renderDesk(overrides: DeskOverrides = {}): string {
       work={overrides.work ?? null}
       tipDismissed={overrides.tipDismissed ?? false}
       agentOn={overrides.agentOn ?? true}
+      notFound={overrides.notFound ?? false}
       query={query}
     />,
   );
@@ -76,12 +77,12 @@ describe("InboxDesk, the empty state", () => {
 });
 
 describe("InboxDesk, the list", () => {
-  it("shows each email as one button: initials, sender, time, subject and a status in words", () => {
+  it("shows each email as one link: initials, sender, time, subject and a status in words", () => {
     const html = renderDesk();
 
-    expect(count(html, /<button type="submit" value="E\d{3}" class="row"[^>]*name="email">/)).toBe(2);
+    expect(count(html, /<a class="row"[^>]*href="\/\?filter=all&amp;email=E\d{3}&amp;view=detail">/)).toBe(2);
     expect(html).toMatch(
-      /<button type="submit" value="E005" class="row" name="email"><span class="av av--\d" aria-hidden="true">JB<\/span>/,
+      /<a class="row" href="\/\?filter=all&amp;email=E005&amp;view=detail"><span class="av av--\d" aria-hidden="true">JB<\/span>/,
     );
     expect(html).toContain('<span class="row-from">Jenna Brooks</span>');
     expect(html).toMatch(/<time[^>]*>07:26<\/time>/);
@@ -93,15 +94,16 @@ describe("InboxDesk, the list", () => {
   it("opens an email in the detail view, keeping the filter in the URL", () => {
     const html = renderDesk({ query: { filter: "other" } });
 
-    expect(html).toMatch(/<form action="\/"[^>]*><input type="hidden" name="filter" value="other"\/>/);
-    expect(html).toContain('<input type="hidden" name="view" value="detail"/>');
+    // Each row's own link carries its email id: a shared form lost the clicked row (next/form).
+    expect(html).toContain('href="/?filter=other&amp;email=E001&amp;view=detail"');
+    expect(html).toContain('href="/?filter=other&amp;email=E005&amp;view=detail"');
   });
 
   it("offers All, Needs you, Done and Other with their counts, the chosen one pressed", () => {
     const html = renderDesk({ query: { filter: "other" } });
 
-    const filter = (value: string, pressed: boolean, words: string, shown: number) =>
-      `<button type="submit" value="${value}" class="filter" aria-pressed="${pressed}" name="filter">${words}<span class="filter-count">${shown}</span></button>`;
+    const filter = (value: string, current: boolean, words: string, shown: number) =>
+      `<a class="filter"${current ? ' aria-current="true"' : ""} href="/?filter=${value}">${words}<span class="filter-count">${shown}</span></a>`;
 
     expect(html).toContain(filter("all", false, "All", 2));
     expect(html).toContain(filter("needs-you", false, "Needs you", 0));
@@ -119,6 +121,11 @@ describe("InboxDesk, the list", () => {
     expect(html).toContain("0 of 2 handled");
   });
 
+  it("says so when the URL asks for an email that is not in today's inbox", () => {
+    expect(renderDesk({ notFound: true })).toContain("That email isn’t in today’s inbox");
+    expect(renderDesk()).toContain("No email chosen");
+  });
+
   it("says in the greeting that the emails are the reader's own when the agent is switched off", () => {
     expect(renderDesk({ agentOn: false })).toContain("2 emails came in today. The agent is switched off, so they’re yours to read.");
   });
@@ -133,8 +140,8 @@ describe("InboxDesk, the selected state", () => {
   it("marks the selected row and shows its subject, sender, time and body", () => {
     const html = renderDesk({ query: { emailId: "E005", view: "detail" }, selected: jenna });
 
-    expect(count(html, /aria-current="true"/)).toBe(1);
-    expect(html).toContain('value="E005" class="row" aria-current="true" name="email"');
+    expect(count(html, /class="row" aria-current="true"/)).toBe(1);
+    expect(html).toMatch(/<a class="row" aria-current="true" href="[^"]*email=E005[^"]*">/);
     expect(html).toContain('<h2 class="title">Orders for 3 clubs</h2>');
     expect(html).toContain("Jenna Brooks &lt;ops@metrofitness.example&gt;");
     expect(html).toMatch(/<time[^>]*>Mon 2 Nov 07:26<\/time>/);
@@ -153,7 +160,7 @@ describe("InboxDesk, the selected state", () => {
   it("keeps the selection when the filter changes", () => {
     const html = renderDesk({ query: { emailId: "E005" }, selected: jenna });
 
-    expect(html).toMatch(/aria-label="Show"[^>]*><input type="hidden" name="email" value="E005"\/>/);
+    expect(html).toContain('<a class="filter" href="/?filter=needs-you&amp;email=E005">');
   });
 
   it("shows the Proposal pane's empty state: no agent has run on this email, and offers to run it", () => {
