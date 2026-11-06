@@ -8,7 +8,7 @@
 
 **Label:** sandcastle
 
-**Status:** ready-for-agent
+**Status:** closed — resolved 2026-11-06 21:43 WIB by sandcastle
 
 ## Context
 
