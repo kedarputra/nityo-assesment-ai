@@ -40,6 +40,23 @@ _Avoid_: Simple order, happy path
 The Proposals and routed Requests waiting for a person.
 _Avoid_: Inbox, approval list
 
+**Agent run**:
+One pass of the agent over one Email, from reading it to its Proposals, outcome and Draft reply. An
+Email can have several Agent runs; only the latest one's undecided Proposals stay open.
+_Avoid_: Job, execution, processing
+
+**Inbox run**:
+Agent runs over every unprocessed Email, one after another in the order they were received.
+_Avoid_: Batch, bulk run
+
+**Snapshot**:
+The ERP and the inbox exactly as delivered at 07:00 on Mon 2 Nov 2026, before any Agent run.
+_Avoid_: Seed, baseline, fixture
+
+**Reset**:
+Returning the ERP, the inbox and the audit log to the Snapshot.
+_Avoid_: Wipe, restore, reseed
+
 **Draft reply**:
 A reply to the customer the agent writes for a person to edit and approve. It is never sent.
 _Avoid_: Response, outbound email

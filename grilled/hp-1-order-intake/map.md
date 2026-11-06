@@ -56,17 +56,39 @@ decisions and assumptions fall out of this map.
 - [What the ops review UI looks like](issues/02-review-ui-prototype.md): a three-pane inbox (list,
   email with the agent's reasoning, Proposal) with blockers first and a one-line headline; no bulk
   approval; quantity, SKU, lines and ship-to are editable, price and customer are not.
+- [Walk the 40 emails through the locked policies](issues/03-per-email-walkthrough.md): expected
+  outcomes for all 40, which also serve as the eval set: 9 released, 22 Proposals, 6 routed and
+  3 no action, after ticket 08 made E031 a Proposal. Its 18 uncovered cases became tickets 07–10.
+- [How a whole-inbox run is driven and how the snapshot is reset](issues/05-inbox-run-and-reset.md):
+  the browser drives one email per request, resumable and locked (ADR 0003); reset by truncate and
+  reseed; one shared preview database; Hobby is enough; `pg` on the pooled URL.
+- [Which security controls the build must meet](issues/06-security-controls.md): password login
+  (no SSO), reviewer and admin roles checked on the server, Zod at every input, untrusted content
+  shown only as text with a CSP, an append-only audit log enforced in the database, rate limits,
+  and no secrets or email bodies in logs.
+- [How the agent turns a customer's words into order lines](issues/07-words-to-order-lines.md): a
+  described line releases when exactly one ACTIVE SKU fits, checked in code; odd units, a swap's
+  size and price, "the usual" and "next Tuesday" go to review with a question.
+- [How the agent links emails that belong together](issues/08-emails-that-belong-together.md): a run
+  reads the customer's other emails and open work today; it links them but never changes another
+  email's Proposal. E031 becomes a Proposal tied to E023's missing PO.
+- [Who the sender is, and what the credit check counts](issues/09-sender-identity-and-credit.md): the
+  verified address wins (E039 releases, E013 gets checked); domain matching only when one customer
+  owns the domain; credit is `open_balance` + same-day releases + this order.
+- [What the agent tells a customer when it can't do what was asked](issues/10-replies-when-we-cannot-do-it.md):
+  every release gets a confirmation; no quantity means a clarifying question; an unmeetable date
+  gets the earliest real date; an order we can't find gets an honest reply.
+- [How the agent's results are measured](issues/11-how-results-are-measured.md): `make eval` with
+  unsafe releases (target 0) first, then outcome, line and review-reason accuracy, three runs; the
+  product brief's production metrics.
+- [Speed and observability targets](issues/12-speed-and-observability.md): under 500 ms per person's
+  action, inbox under 1.5 s, runs usually under 60 s; Agent run records in Postgres and structured
+  logs with no bodies or secrets; no third-party monitoring.
 
 ## Not yet specified
 
-- **New case policies.** Whatever the
-  [walkthrough of the 40 emails](issues/03-per-email-walkthrough.md) finds that no policy covers.
-- **The eval script and its metrics.** How a live run over the 40 emails is scored against the
-  walkthrough's expected outcomes for `docs/results.md`: which mismatches count, and how a
-  routed-but-correct email scores.
-- **Production success metrics** for the product brief (brief item 1, "how you would measure success
-  in production"): what gets measured, such as the share released untouched, edit rate on Proposals,
-  time to order and gate misses.
+Nothing. Every patch of fog has become a ticket and been decided; the way to the destination
+is clear, and the next step is `/to-tickets` (only the developer can run it).
 
 ## Out of scope
 
@@ -77,5 +99,7 @@ decisions and assumptions fall out of this map.
 - **Quote generation, and a returns, credits or invoices model.** The ERP has no such data; these
   requests are routed to a person
   ([other kinds](issues/01-charting-decisions.md#requests-that-are-not-new-orders)).
-- **An outside auth provider** ([login](issues/01-charting-decisions.md#login)).
+- **An outside auth provider or SSO** ([login](issues/01-charting-decisions.md#login)), confirmed
+  by [Which security controls the build must meet](issues/06-security-controls.md) after the
+  developer raised SSO.
 - **Live mailbox polling.** The inbox is the 40 emails of 2 Nov, loaded by the ingest.
