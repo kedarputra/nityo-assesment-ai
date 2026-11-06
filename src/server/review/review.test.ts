@@ -103,6 +103,7 @@ describe("reviewing a Proposal", () => {
 
       expect(approved).toEqual({
         released: true,
+        kind: "new order",
         emailId: "E019",
         soNumber: "SO-24059",
         totalCents: 27200,

@@ -3,10 +3,11 @@ import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
-import type { EmailWork, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
+import type { EmailWork, LinkedProposalView, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
 import { RunAgentButton } from "./agent-run";
 import { CheckList, PassingChecks } from "./checks";
+import { ChangeLines, formatChange } from "./change-lines";
 import { DraftReplyEditor, ProposalReview, SwappedFor } from "./proposal-review";
 import { StatusPill } from "./status-pill";
 
@@ -190,6 +191,7 @@ function ProposalCard({ proposal, takesKeys }: { proposal: ProposalView; takesKe
         {proposal.requestedDateWords ? ` (“${proposal.requestedDateWords}”)` : null}
       </p>
       {proposal.decision ? <Decision proposal={proposal} /> : null}
+      {proposal.linked.length > 0 ? <LinkedProposals linked={proposal.linked} /> : null}
       {isUndecided(proposal) ? (
         <ProposalReview proposal={proposal} takesKeys={takesKeys} />
       ) : (
@@ -201,7 +203,7 @@ function ProposalCard({ proposal, takesKeys }: { proposal: ProposalView; takesKe
             </section>
           ) : null}
           <PassingChecks checks={proposal.checks} />
-          <Lines proposal={proposal} />
+          {proposal.kind === "new order" ? <Lines proposal={proposal} /> : <ChangeLines proposal={proposal} />}
         </>
       )}
     </article>
@@ -209,6 +211,35 @@ function ProposalCard({ proposal, takesKeys }: { proposal: ProposalView; takesKe
 }
 
 function headline(proposal: ProposalView): string {
+  switch (proposal.kind) {
+    case "new order":
+      return newOrderHeadline(proposal);
+    case "order change":
+    case "cancellation":
+      return changeHeadline(proposal, proposal.kind);
+  }
+}
+
+function changeHeadline(proposal: ProposalView, kind: "order change" | "cancellation"): string {
+  const order = proposal.targetSoNumber ?? "the order";
+  const change = formatChange(proposal.totalCents);
+  const what = kind === "cancellation" ? `Cancel ${order}` : `Change ${order}`;
+  switch (proposal.status) {
+    case "released":
+      return `You ${kind === "cancellation" ? "cancelled" : "changed"} ${order} for ${proposal.customerName}, ${change}`;
+    case "rejected":
+      return `${what} for ${proposal.customerName}: rejected`;
+    case "held":
+      return `${what} for ${proposal.customerName} is on hold, ${change}`;
+    case "open":
+      if (proposal.checks.some((check) => !check.passes && isHardRule(check.check))) {
+        return `${order} can’t be ${kind === "cancellation" ? "cancelled" : "changed"} (${change})`;
+      }
+      return `${what} for ${proposal.customerName}, ${change}, waiting for you`;
+  }
+}
+
+function newOrderHeadline(proposal: ProposalView): string {
   const total = formatUsd(proposal.totalCents);
   switch (proposal.status) {
     case "released":
@@ -299,6 +330,30 @@ function Lines({ proposal }: { proposal: ProposalView }) {
         </tr>
       </tfoot>
     </table>
+  );
+}
+
+const LINKED_WORDS: Record<LinkedProposalView["relation"], string> = {
+  follows: "Adds to the order still waiting from",
+  "followed-by": "More for this order is waiting from",
+};
+
+// U2: a follow-up and the pending order it adds to are decided separately, so each shows the other.
+function LinkedProposals({ linked }: { linked: LinkedProposalView[] }) {
+  return (
+    <section className="thinks" aria-label="Linked Proposals">
+      <h3 className="who">Goes with</h3>
+      <ul className="checks">
+        {linked.map((other) => (
+          <li key={other.proposalId}>
+            <span>
+              {LINKED_WORDS[other.relation]} <Link href={emailHref(other.emailId)}>{other.emailId}</Link>:{" "}
+              {formatUsd(other.totalCents)}, {DECISION_WORDS[other.status].label.toLowerCase()}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

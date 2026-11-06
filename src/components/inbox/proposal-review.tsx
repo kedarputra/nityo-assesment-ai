@@ -13,6 +13,7 @@ import {
   type ReviewActionResult,
 } from "@/server/review/actions";
 import type { ProductMatch, ProposalEdit, SetAsideKind } from "@/server/review/review";
+import { ChangeLines } from "./change-lines";
 import { checkName, CheckList, lockedBecause, PassingChecks } from "./checks";
 import { useReviewDesk } from "./review-desk";
 
@@ -135,8 +136,15 @@ export function ProposalReview({ proposal, takesKeys }: { proposal: ProposalView
         </section>
       ) : null}
       <PassingChecks checks={proposal.checks} />
-      <EditableLines proposal={proposal} busy={busy} onEdit={edit} />
-      <ShipToChoice proposal={proposal} busy={busy} onEdit={edit} />
+      {proposal.kind === "new order" ? (
+        <>
+          <EditableLines proposal={proposal} busy={busy} onEdit={edit} />
+          <ShipToChoice proposal={proposal} busy={busy} onEdit={edit} />
+        </>
+      ) : (
+        // A change is approved or rejected as the customer asked for it; the server refuses edits.
+        <ChangeLines proposal={proposal} />
+      )}
       <div className="decision-bar">
         <p className="inline-error" role="alert" hidden={error === null}>
           {error}
@@ -156,7 +164,7 @@ export function ProposalReview({ proposal, takesKeys }: { proposal: ProposalView
             {hardBlocked ? null : (
               <button type="button" className="btn btn--primary" aria-busy={busy} disabled={busy} onClick={approve}>
                 {busy ? <span className="spinner" aria-hidden="true" /> : null}
-                Approve &amp; release <kbd className="desk-only">a</kbd>
+                {APPROVE_WORDS[proposal.kind]} <kbd className="desk-only">a</kbd>
               </button>
             )}
             {canHold ? (
@@ -181,6 +189,12 @@ export function ProposalReview({ proposal, takesKeys }: { proposal: ProposalView
     </>
   );
 }
+
+const APPROVE_WORDS: Record<ProposalView["kind"], string> = {
+  "new order": "Approve & release",
+  "order change": "Approve change",
+  cancellation: "Approve cancellation",
+};
 
 // Reasons are typed inline, never in a browser prompt; Enter confirms, Esc cancels.
 function InlineReason({

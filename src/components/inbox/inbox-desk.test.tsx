@@ -196,8 +196,10 @@ const e001Released: EmailWork = {
   proposals: [
     {
       id: 1,
+      kind: "new order",
       status: "released",
       soNumber: "SO-24059",
+      targetSoNumber: null,
       customerName: "Bluefin Bistro Group",
       shipToId: "S001",
       shipToName: "Bluefin Bistro - Pier Street",
@@ -219,10 +221,14 @@ const e001Released: EmailWork = {
           lineTotalCents: 18000,
           customerWords: "HPS-1408  x 4",
           available: 26,
+          orderLineNo: null,
+          before: null,
+          after: null,
         },
       ],
       decision: null,
       shipToChoices: [{ shipToId: "S001", name: "Bluefin Bistro - Pier Street" }],
+      linked: [],
     },
   ],
   routed: [],
@@ -331,8 +337,10 @@ describe("InboxDesk, the Proposal pane after a run", () => {
       proposals: [
         {
           id: 1,
+          kind: "new order",
           status: "open",
           soNumber: null,
+          targetSoNumber: null,
           customerName: "Northside Community Center",
           shipToId: "S018",
           shipToName: "Northside Community Center",
@@ -354,10 +362,14 @@ describe("InboxDesk, the Proposal pane after a run", () => {
               lineTotalCents: 27200,
               customerWords: null,
               available: 40,
+              orderLineNo: null,
+              before: null,
+              after: null,
             },
           ],
           decision: null,
           shipToChoices: [{ shipToId: "S018", name: "Northside Community Center" }],
+          linked: [],
         },
       ],
     };
@@ -568,5 +580,81 @@ describe("InboxDesk, reviewing a Proposal", () => {
     expect(html).not.toContain("Mark reply ready");
     expect(html).toContain("The order from Bluefin Bistro Group was rejected");
     expect(html).not.toContain("Reject…");
+  });
+
+  // E004: SO-24051's tissue 20 → 25 cases at the order's $66.00 and 5 cases of foam soap added.
+  const e004Lines = (base.lines[0] ? [base.lines[0]] : []).flatMap((line) => [
+    {
+      ...line,
+      lineNo: 1,
+      sku: "HPS-1103",
+      productName: "Toilet Tissue, Standard Roll",
+      quantity: 5,
+      unitPriceCents: 6600,
+      priceSource: null,
+      lineTotalCents: 33000,
+      customerWords: null,
+      orderLineNo: 1,
+      before: 20,
+      after: 25,
+    },
+    {
+      ...line,
+      lineNo: 2,
+      sku: "HPS-1304",
+      productName: "Foam Hand Soap Refill",
+      quantity: 5,
+      unitPriceCents: 4900,
+      lineTotalCents: 24500,
+      customerWords: null,
+      orderLineNo: null,
+      before: 0,
+      after: 5,
+    },
+  ]);
+
+  it("shows an order change as before → after, with Approve change and no line editing", () => {
+    const html = withProposal({
+      kind: "order change",
+      targetSoNumber: "SO-24051",
+      customerName: "Harborview Hotel",
+      totalCents: 57500,
+      lines: e004Lines,
+    });
+
+    expect(html).toContain('<h2 class="headline">Change SO-24051 for Harborview Hotel, +$575.00, waiting for you</h2>');
+    expect(html).toContain("20 → 25");
+    expect(html).toContain("0 → 5");
+    expect(html).toContain("+$330.00");
+    expect(html).toContain("Change in order value");
+    expect(html).toContain("Approve change");
+    expect(html).not.toContain("+ Add a line");
+    expect(html).not.toContain("Change product");
+  });
+
+  it("shows a cancellation's value going down, and a SHIPPED order's change as one that can't be made", () => {
+    const cancellation = withProposal({ kind: "cancellation", targetSoNumber: "SO-24055", customerName: "Summit Office Park", totalCents: -150000 });
+    expect(cancellation).toContain("Cancel SO-24055 for Summit Office Park, −$1,500.00, waiting for you");
+    expect(cancellation).toContain("Approve cancellation");
+
+    const shipped = withProposal({
+      kind: "order change",
+      targetSoNumber: "SO-24040",
+      totalCents: 6600,
+      checks: [{ check: "edit-rights", passes: false, detail: "SO-24040 has shipped and cannot be edited." }],
+    });
+    expect(shipped).toContain("SO-24040 can’t be changed (+$66.00)");
+    expect(shipped).toContain("The order can still change");
+    expect(shipped).not.toContain("Approve change");
+  });
+
+  it("shows a follow-up beside the pending Proposal it adds to (U2)", () => {
+    const html = withProposal({
+      linked: [{ relation: "follows", proposalId: 7, emailId: "E010", status: "open", totalCents: 31300 }],
+    });
+
+    expect(html).toContain(
+      'Adds to the order still waiting from <a href="/?filter=all&amp;email=E010">E010</a>: $313.00, needs you',
+    );
   });
 });

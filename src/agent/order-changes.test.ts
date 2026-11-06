@@ -8,6 +8,7 @@ import { approveProposal } from "@/server/review/review";
 import { ingestSnapshot } from "@/snapshot/snapshot";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e012Script } from "@/test/review-scripts";
+import { releasedTodayFor } from "./release-gate";
 import { runAgent } from "./run-agent";
 
 // Order changes, cancellations and follow-ups (ticket 11), played with the fake model against the
@@ -146,6 +147,8 @@ describe("order changes and cancellations", () => {
       [4, "HPS-1304", 5, 4900],
     ]);
     expect(await orderStatus("SO-24051")).toBe("OPEN");
+    // The increase counts against C003's credit like a release today.
+    expect(await releasedTodayFor(testDatabase.db, "C003")).toBe(57500);
     expect(await available("HPS-1103")).toBe(75);
     expect(await available("HPS-1304")).toBe(25);
     const [event] = await testDatabase.db
@@ -201,6 +204,8 @@ describe("order changes and cancellations", () => {
     ]);
     expect(await available("HPS-1201")).toBe(90);
     expect(await available("HPS-1103")).toBe(90);
+    // A cancellation never lowers the exposure the credit check counts.
+    expect(await releasedTodayFor(testDatabase.db, "C012")).toBe(0);
   });
 
   it("refuses a change to a SHIPPED order (SO-24040) as a hard rule", async () => {
