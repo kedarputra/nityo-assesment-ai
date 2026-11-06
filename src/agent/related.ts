@@ -148,8 +148,9 @@ export async function linkRelatedEmail(tx: Database, context: RelatedContext, li
     why: link.why,
     possiblySameOrder: link.possiblySameOrder,
   });
-  const flag = link.possiblySameOrder ? `RELATED-${link.relatedEmailId}` : null;
-  if (flag !== null) {
+  let flag: string | null = null;
+  if (link.possiblySameOrder) {
+    flag = `RELATED-${link.relatedEmailId}`;
     await tx.insert(agentFlags).values({ runId: context.runId, emailId: context.emailId, code: flag, note: link.why });
   }
   if (link.remark !== null) {

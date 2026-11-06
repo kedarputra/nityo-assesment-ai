@@ -27,6 +27,7 @@ import { shortStock, type ShortStock, type ShortStockChoice } from "@/rules/shor
 import { recordAudit } from "./audit";
 import { sellingUnitFits, skuCodesIn } from "./product-search";
 import { releaseChecks, type ReleaseCheck } from "./release-checks";
+import { normaliseAddress } from "./sender";
 import { ToolError } from "./tool-error";
 
 // The release gate (ADR 0001): code, not the model, decides whether a proposed new order is a
@@ -241,7 +242,7 @@ export async function checkOrder(tx: Database, order: OrderToCheck): Promise<Che
     .select({ shipToId: shipToAddresses.shipToId, name: shipToAddresses.name })
     .from(shipToAddresses)
     .where(eq(shipToAddresses.customerId, customer.customerId));
-  const otherProposals = await tx
+  const runProposals = await tx
     .select({ shipToId: proposals.shipToId })
     .from(proposals)
     .where(eq(proposals.runId, order.runId));
@@ -267,7 +268,7 @@ export async function checkOrder(tx: Database, order: OrderToCheck): Promise<Che
     shipTosOfTheEmail: shipTosOfTheEmail({
       shipToId: order.shipToId,
       named: shipTosNamedIn(email?.body ?? "", shipTos),
-      proposed: otherProposals.map((proposal) => proposal.shipToId),
+      proposed: runProposals.map((proposal) => proposal.shipToId),
     }),
     flagCodes: flags.map((flag) => flag.code),
     runId: order.runId,
@@ -771,8 +772,4 @@ async function nextSoNumber(tx: Database): Promise<string> {
     return match ? Math.max(max, Number(match[1])) : max;
   }, 0);
   return `SO-${highest + 1}`;
-}
-
-function normaliseAddress(address: string): string {
-  return address.trim().toLowerCase();
 }
