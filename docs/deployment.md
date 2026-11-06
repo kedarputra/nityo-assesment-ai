@@ -128,8 +128,9 @@ npm run db:seed-users   # on DATABASE_URL
 the users and their sessions, which is why `db:seed-users` follows it straight away: until it
 runs, nobody can sign in.
 
-The same two commands reset the shared preview database with the Preview values. To start a database from nothing instead (drop and recreate the Neon branch), redeploy: the
-build migrates and seeds the empty database.
+The same two commands reset the shared preview database with the Preview values. To start a
+database from nothing instead (drop and recreate the Neon branch), redeploy: the build migrates
+and seeds the empty database.
 
 **Rotating a password:** export the new `SEED_*` values and `DATABASE_URL`, and run
 `npm run db:seed-users`; it updates existing users in place. Update the values in Vercel too, so

@@ -1,5 +1,6 @@
 // Creates or updates the seeded logins from the SEED_* env vars: `npm run db:seed-users`.
-// The deploy runs it after the migrations; see .env.example for the variables.
+// Rerun it to rotate a password; the deploy's `db:prepare` seeds users only into an empty
+// database. See .env.example for the variables.
 import { getDatabase } from "@/db/client";
 import { seedUsers } from "@/server/auth/seed-users";
 
