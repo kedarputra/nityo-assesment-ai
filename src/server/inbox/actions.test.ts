@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "@/db/database";
-import { auditEvents, inventory, users } from "@/db/schema";
+import { agentRuns, auditEvents, inventory, users } from "@/db/schema";
 import type { ModelRequest } from "@/model/model";
 import { ScriptedModel } from "@/model/scripted-model";
 import { SESSION_COOKIE } from "@/server/auth/gate";
@@ -84,11 +84,26 @@ describe("runAgentAction", () => {
     testDatabase = await createTestDatabase();
     database = testDatabase.db;
     await ingestSnapshot(database);
+    // The action runs only with a key (src/model/agent-switch.ts); the model itself is the fake.
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key-never-sent");
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     cookieJar.clear();
     await testDatabase.close();
+  });
+
+  it("refuses calmly, and writes no Agent run, when the deploy has no Anthropic key", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    await signInAs("reviewer");
+
+    expect(await runAgentAction("E001")).toEqual({
+      ok: false,
+      message: "The agent is switched off on this desk for now, so it won’t read emails.",
+    });
+    expect(await database.select().from(agentRuns)).toHaveLength(0);
+    expect(await findInboxEmail(database, "E001")).toMatchObject({ status: "not_run" });
   });
 
   it("runs the agent on E001 for a reviewer: released, with the Proposal pane's headline facts and reply", async () => {

@@ -1,5 +1,6 @@
 import { InboxDesk } from "@/components/inbox/inbox-desk";
 import { getDatabase } from "@/db/client";
+import { isAgentConfigured } from "@/model/agent-switch";
 import { requireUser } from "@/server/auth/current-user";
 import { findEmailWork } from "@/server/inbox/email-work";
 import {
@@ -38,6 +39,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
       selected={selected}
       work={work}
       tipDismissed={tipDismissed}
+      agentOn={isAgentConfigured()}
     />
   );
 }

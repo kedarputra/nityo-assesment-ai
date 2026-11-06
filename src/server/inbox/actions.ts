@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AgentRunRefused, runAgent } from "@/agent/run-agent";
 import { getDatabase } from "@/db/client";
+import { AGENT_OFF_MESSAGE, isAgentConfigured } from "@/model/agent-switch";
 import { AnthropicModel, modelIdFromEnv } from "@/model/anthropic-model";
 import { requireRole } from "@/server/auth/current-user";
 import { dismissTip } from "./inbox";
@@ -25,6 +26,8 @@ export async function runAgentAction(emailId: string): Promise<RunAgentResult> {
   const user = await requireRole("reviewer");
   const parsed = emailIdInput.safeParse(emailId);
   if (!parsed.success) return { ok: false, message: "That email isn’t in today’s inbox." };
+  // Refused before any write, so a deploy without a key records no failed Agent runs.
+  if (!isAgentConfigured()) return { ok: false, message: AGENT_OFF_MESSAGE };
 
   const modelId = modelIdFromEnv();
   try {

@@ -3,6 +3,7 @@ import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
+import { AGENT_OFF_MESSAGE } from "@/model/agent-switch";
 import type { EmailWork, LinkedProposalView, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
 import { RunAgentButton } from "./agent-run";
@@ -44,9 +45,17 @@ const NO_ACTION_REASONS: Record<NoActionReason, string> = {
   duplicate: "It repeats an email whose order is already in.",
 };
 
-export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null; work: EmailWork | null }) {
-  if (!email) return <NothingToDecide email={null} />;
-  if (!work) return <NothingToDecide email={email} />;
+export function ProposalPane({
+  email,
+  work,
+  agentOn,
+}: {
+  email: InboxEmailWithBody | null;
+  work: EmailWork | null;
+  agentOn: boolean;
+}) {
+  if (!email) return <NothingToDecide email={null} agentOn={agentOn} />;
+  if (!work) return <NothingToDecide email={email} agentOn={agentOn} />;
   if (!work.run.finished) return <StillReading />;
   if (work.run.outcome === "failed") return <RunDidNotFinish email={email} errorClass={work.run.errorClass} />;
 
@@ -70,16 +79,20 @@ export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null
   );
 }
 
-function NothingToDecide({ email }: { email: InboxEmailWithBody | null }) {
+function NothingToDecide({ email, agentOn }: { email: InboxEmailWithBody | null; agentOn: boolean }) {
   return (
     <div className="pane-empty">
       {email ? <StatusPill status={email.status} /> : null}
       <h2 className="headline">Nothing to decide yet</h2>
-      <p className="meta">
-        The agent hasn’t read {email ? "this email" : "today’s emails"} yet. When it has, what it proposes shows up
-        here for you to approve, change or reject.
-      </p>
-      {email ? <RunAgentButton emailId={email.emailId} /> : null}
+      {agentOn ? (
+        <p className="meta">
+          The agent hasn’t read {email ? "this email" : "today’s emails"} yet. When it has, what it proposes shows up
+          here for you to approve, change or reject.
+        </p>
+      ) : (
+        <p className="meta">{AGENT_OFF_MESSAGE} You can still read every email and handle it yourself.</p>
+      )}
+      {email && agentOn ? <RunAgentButton emailId={email.emailId} /> : null}
     </div>
   );
 }

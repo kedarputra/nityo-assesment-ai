@@ -107,7 +107,7 @@ a local run. None is committed.
 | --- | --- | --- | --- |
 | `DATABASE_URL` | the app | Neon `main`, pooled, as `harbor_point_web` (above) | Neon `preview`, pooled, as `harbor_point_web` |
 | `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset` | Neon `main`, direct (injected) | Neon `preview`, direct |
-| `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production` | key from `harbor-point-preview` |
+| `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production`, or unset (below) | key from `harbor-point-preview`, or unset |
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
 | `SEED_ADMIN_PASSWORD` | the user seed | `admin`'s password, 12+ characters | its own value |
@@ -136,6 +136,13 @@ limit is reached Anthropic answers 400 ("usage limits") or 429 `enforced_spend_l
 the agent is to stop the run with the calm message from `DESIGN.md`, never retrying.
 
 No test, `make verify` or `make check` calls the model, so CI needs no key.
+
+**Without a key the agent is off, and nothing else changes.** Leave `ANTHROPIC_API_KEY` unset (or
+empty) in an environment and that deploy serves the full desk (sign-in, the inbox, review, the
+audit log) with the agent switched off: the Proposal pane says so in place of "Run the agent", and
+the run action refuses before it writes anything, so no failed Agent runs pile up and nothing is
+spent. Setting the key and redeploying turns the agent on
+([`src/model/agent-switch.ts`](../src/model/agent-switch.ts)).
 
 ## Resetting production
 

@@ -46,6 +46,7 @@ function renderDesk(overrides: DeskOverrides = {}): string {
       selected={overrides.selected ?? null}
       work={overrides.work ?? null}
       tipDismissed={overrides.tipDismissed ?? false}
+      agentOn={overrides.agentOn ?? true}
       query={query}
     />,
   );
@@ -157,6 +158,14 @@ describe("InboxDesk, the selected state", () => {
     expect(html).toContain("The agent hasn’t read this email yet.");
     // A secondary button, not the view's one primary (DESIGN.md, "Buttons").
     expect(html).toContain('<button type="button" class="btn" aria-busy="false">Run the agent</button>');
+  });
+
+  it("says the agent is switched off, and offers no run, when the deploy has no Anthropic key", () => {
+    const html = renderDesk({ query: { emailId: "E005" }, selected: jenna, agentOn: false });
+
+    expect(html).toContain("Nothing to decide yet");
+    expect(html).toContain("The agent is switched off on this desk for now");
+    expect(html).not.toContain("Run the agent");
   });
 
   it("renders a body, subject and sender name containing markup as text, never as HTML", () => {

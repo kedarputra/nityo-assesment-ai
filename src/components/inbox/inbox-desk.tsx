@@ -29,6 +29,8 @@ export interface InboxDeskProps {
   // What the agent did with the selected email, or null when it has not run on it.
   work: EmailWork | null;
   tipDismissed: boolean;
+  // False when the deploy has no Anthropic key: the desk works, the agent does not run.
+  agentOn: boolean;
 }
 
 const FILTER_NAMES: Record<InboxFilter, string> = {
@@ -40,7 +42,7 @@ const FILTER_NAMES: Record<InboxFilter, string> = {
 
 // The three-pane desk (DESIGN.md, "Layout and responsiveness"). The URL holds its state, so
 // every control is a GET form: a native button that works before the page's script loads.
-export function InboxDesk({ query, emails, counts, shown, selected, work, tipDismissed }: InboxDeskProps) {
+export function InboxDesk({ query, emails, counts, shown, selected, work, tipDismissed, agentOn }: InboxDeskProps) {
   return (
     <AgentRunsProvider>
       <ReviewDeskProvider
@@ -65,7 +67,7 @@ export function InboxDesk({ query, emails, counts, shown, selected, work, tipDis
             {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
           </section>
           <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
-            <ProposalPane email={selected} work={work} />
+            <ProposalPane email={selected} work={work} agentOn={agentOn} />
           </section>
         </div>
       </ReviewDeskProvider>
