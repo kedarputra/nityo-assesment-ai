@@ -51,24 +51,24 @@ export async function findInboxEmail(db: Database, emailId: string): Promise<Inb
   return { ...row, status: statusOf(runs.get(emailId)) };
 }
 
-interface RunState {
+interface LatestRun {
   endedAt: Date | null;
   outcome: AgentRunOutcome | null;
 }
 
 // Each email's latest Agent run, newest first so the first one seen wins.
-async function latestRuns(db: Database, emailId?: string): Promise<Map<string, RunState>> {
+async function latestRuns(db: Database, emailId?: string): Promise<Map<string, LatestRun>> {
   const rows = await db
     .select({ emailId: agentRuns.emailId, endedAt: agentRuns.endedAt, outcome: agentRuns.outcome })
     .from(agentRuns)
     .where(emailId === undefined ? undefined : eq(agentRuns.emailId, emailId))
     .orderBy(desc(agentRuns.startedAt));
-  const latest = new Map<string, RunState>();
+  const latest = new Map<string, LatestRun>();
   for (const row of rows) if (!latest.has(row.emailId)) latest.set(row.emailId, row);
   return latest;
 }
 
-function statusOf(run: RunState | undefined): InboxStatus {
+function statusOf(run: LatestRun | undefined): InboxStatus {
   if (!run) return "not_run";
   if (run.endedAt === null || run.outcome === null) return "reading";
   switch (run.outcome) {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { Database } from "@/db/database";
-import { agentFlags, agentRuns, emails, proposals, type AgentRunOutcome, type GateVerdict } from "@/db/schema";
+import { agentFlags, agentRuns, emails, proposals, type AgentRunOutcome, type GateVerdict, type ProposalStatus } from "@/db/schema";
 import { businessDateOf } from "@/lib/business-clock";
 import { toolCallsIn, type Model, type ModelMessage, type ModelResponse, type ToolCall, type ToolResult } from "@/model/model";
 import { BusinessRuleError } from "@/rules/business-rules";
@@ -225,7 +225,7 @@ async function finishRun(db: Database, { context, state, usage, errorClass, mode
 }
 
 // One open Proposal is enough for the run to need a person.
-function gateVerdictOf(statuses: string[]): GateVerdict | null {
+function gateVerdictOf(statuses: ProposalStatus[]): GateVerdict | null {
   if (statuses.includes("open")) return "review";
   if (statuses.includes("released")) return "released";
   return null;
