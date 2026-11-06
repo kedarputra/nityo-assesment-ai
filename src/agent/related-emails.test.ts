@@ -52,12 +52,12 @@ describe("sender trust, split deliveries and linked emails", () => {
     return { summary, proposals: made, flags: flags.map((flag) => flag.code), model };
   }
 
-  // What the agent was told in answer to one tool call.
+  // What the agent was told in answer to one tool call: the result, or the refusal's text.
   function resultOf(model: ScriptedModel, callId: string): unknown {
     for (const request of model.requests) {
       for (const message of request.messages) {
         for (const part of message.content) {
-          if (part.type === "tool_result" && part.toolCallId === callId) return JSON.parse(part.content);
+          if (part.type === "tool_result" && part.toolCallId === callId) return part.isError ? part.content : JSON.parse(part.content);
         }
       }
     }
@@ -388,12 +388,8 @@ describe("sender trust, split deliveries and linked emails", () => {
       repliesWith("Done."),
     ]);
 
-    const messages = model.requests.at(-1)?.messages ?? [];
-    const results = messages.flatMap((message) => message.content).filter((part) => part.type === "tool_result");
-    expect(results).toMatchObject([
-      { toolCallId: "call_other_customer", isError: true },
-      { toolCallId: "call_later", isError: true },
-    ]);
+    expect(resultOf(model, "call_other_customer")).toMatch(/not one of C003's emails that came in earlier today/);
+    expect(resultOf(model, "call_later")).toMatch(/not one of C003's emails that came in earlier today/);
     expect(await testDatabase.db.select().from(emailLinks)).toEqual([]);
     expect(await testDatabase.db.select().from(agentFlags)).toEqual([]);
   });
