@@ -1,12 +1,156 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
 
-// The app's own settings, one value per key. The scaffold's first table: it gives the
-// migration harness something real to migrate. The ERP tables arrive with the data load.
+// The app's own settings, one value per key.
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// The ERP and the inbox as the data pack delivers them. The pack stores every column as TEXT;
+// here money is integer cents, dates are dates, quantities are integers and statuses are the
+// pack's own values, constrained. Column names follow the pack, with `_cents` on money.
+
+export const customerStatus = pgEnum("customer_status", ["ACTIVE", "CREDIT_HOLD"]);
+export const sellUom = pgEnum("sell_uom", ["CS", "EA"]);
+export const productStatus = pgEnum("product_status", ["ACTIVE", "DISCONTINUED"]);
+export const salesOrderStatus = pgEnum("sales_order_status", [
+  "OPEN",
+  "PARTIALLY_SHIPPED",
+  "SHIPPED",
+]);
+
+export const customers = pgTable("customers", {
+  customerId: text("customer_id").primaryKey(),
+  name: text("name").notNull(),
+  paymentTerms: text("payment_terms").notNull(),
+  creditLimitCents: integer("credit_limit_cents").notNull(),
+  openBalanceCents: integer("open_balance_cents").notNull(),
+  status: customerStatus("status").notNull(),
+});
+
+// The pack gives contacts no id of their own.
+export const customerContacts = pgTable("customer_contacts", {
+  id: serial("id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+});
+
+export const shipToAddresses = pgTable("ship_to_addresses", {
+  shipToId: text("ship_to_id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  name: text("name").notNull(),
+  address: text("address").notNull(),
+  isDefault: boolean("is_default").notNull(),
+});
+
+export const products = pgTable("products", {
+  sku: text("sku").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  sellUom: sellUom("sell_uom").notNull(),
+  pack: text("pack").notNull(),
+  listPriceCents: integer("list_price_cents").notNull(),
+  status: productStatus("status").notNull(),
+  replacedBy: text("replaced_by").references((): AnyPgColumn => products.sku),
+});
+
+export const customerPrices = pgTable("customer_prices", {
+  id: serial("id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  sku: text("sku")
+    .notNull()
+    .references(() => products.sku),
+  unitPriceCents: integer("unit_price_cents").notNull(),
+  validFrom: date("valid_from").notNull(),
+  validTo: date("valid_to").notNull(),
+});
+
+// `available` is derived by the database, so it cannot drift from on_hand and allocated.
+export const inventory = pgTable("inventory", {
+  sku: text("sku")
+    .primaryKey()
+    .references(() => products.sku),
+  onHand: integer("on_hand").notNull(),
+  allocated: integer("allocated").notNull(),
+  available: integer("available")
+    .notNull()
+    .generatedAlwaysAs(sql`on_hand - allocated`),
+});
+
+export const incomingSupply = pgTable("incoming_supply", {
+  id: serial("id").primaryKey(),
+  supplierPo: text("supplier_po").notNull(),
+  sku: text("sku")
+    .notNull()
+    .references(() => products.sku),
+  qty: integer("qty").notNull(),
+  expectedDate: date("expected_date").notNull(),
+});
+
+export const salesOrders = pgTable("sales_orders", {
+  soNumber: text("so_number").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customers.customerId),
+  shipToId: text("ship_to_id")
+    .notNull()
+    .references(() => shipToAddresses.shipToId),
+  customerPo: text("customer_po"),
+  orderDate: date("order_date").notNull(),
+  requestedDate: date("requested_date").notNull(),
+  status: salesOrderStatus("status").notNull(),
+});
+
+export const salesOrderLines = pgTable(
+  "sales_order_lines",
+  {
+    soNumber: text("so_number")
+      .notNull()
+      .references(() => salesOrders.soNumber),
+    lineNo: integer("line_no").notNull(),
+    sku: text("sku")
+      .notNull()
+      .references(() => products.sku),
+    qtyOrdered: integer("qty_ordered").notNull(),
+    qtyShipped: integer("qty_shipped").notNull(),
+    unitPriceCents: integer("unit_price_cents").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.soNumber, table.lineNo] })],
+);
+
+// No email in the pack has an attachment, so there is no column for them; the ingest refuses
+// an email that has one rather than drop it.
+export const emails = pgTable("emails", {
+  emailId: text("email_id").primaryKey(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  fromName: text("from_name").notNull(),
+  fromEmail: text("from_email").notNull(),
+  to: text("to").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
 });
 
 // A person who signs in (security 1 and 2). Seeded from env vars, never signed up; the hash is
