@@ -5,22 +5,51 @@ operations team approving anything risky. Built for the AI Engineer assessment
 ([the brief](docs/brief/assessment.md)) on the
 [data pack](data/harbor_point_data_pack/README.md) as delivered.
 
-> **Status: scaffold.** The agent tooling is in place; the app is not built yet. The sections
-> marked *to do* fill in as it is.
+> **Status: in progress.** The data pack loads, sign-in works and the deploy is configured; the
+> agent and the review desk fill in ticket by ticket under `grilled/`.
 
 ## Live
 
-*To do:* the production URL, and any login.
+- **URL:** *to fill in once the Vercel project is connected* (`grilled/hp-1-order-intake`, ticket 17).
+- **Assessor login:** username *to fill in*; the password is sent separately, never committed.
 
 ## Run it locally
 
-*To do*, once the stack is chosen. The contract is already fixed: `make setup` installs, `make
-check` runs every test and the build ([`Makefile`](Makefile)).
+From a clone to a working desk with the seeded logins. You need **Node 22** (`.nvmrc`) and a
+**Postgres** (16 or later). The app has no in-process database mode: PGlite, the in-process
+Postgres, runs only the tests, which need no server at all (`make check`).
+
+1. **Install:** `make setup`.
+2. **Start a Postgres**, for example in Docker:
+
+   ```sh
+   docker run -d --name harbor-point-db -p 5432:5432 \
+     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=harbor_point postgres:17
+   ```
+
+3. **Configure:** `cp .env.example .env.local`, then set
+   `DATABASE_URL=postgres://postgres:postgres@localhost:5432/harbor_point`, the three passwords
+   (`SEED_REVIEWER_PASSWORD`, `SEED_ADMIN_PASSWORD`, `SEED_ASSESSOR_PASSWORD`, 12 characters or
+   more) and `SEED_ASSESSOR_USERNAME`. Leave `DATABASE_URL_UNPOOLED` empty: a local Postgres has
+   no pooler. `ANTHROPIC_API_KEY` is needed only to run the agent.
+4. **Migrate and seed**, exactly as a deploy does: `set -a && . ./.env.local && set +a`, then
+   `npm run db:prepare`. It loads the Snapshot (the data pack at 07:00) and the logins into the
+   empty database; run again, it only migrates.
+5. **Run:** `npm run dev` and open <http://localhost:3000>. Sign in as `ops.reviewer` (reviewer),
+   `admin` (admin) or your assessor username, with the passwords from step 3.
+
+Back to the Snapshot at any time: `npm run db:reset`, then `npm run db:seed-users` (the reset
+empties the users too). The checks: `make check` runs lint, the type check, every test, the build
+and `npm audit` ([`Makefile`](Makefile)).
 
 ## How it is deployed
 
 Vercel, through its Git integration: a merge to `main` deploys production, and each pushed branch
-gets a preview URL. Nothing is deployed by hand. The details go in `docs/deployment.md`.
+gets a preview URL. Nothing is deployed by hand. Every build migrates its database over Neon's
+direct URL and seeds it only if it is empty, so a deploy never overwrites the data; production uses
+the Neon `main` branch and every preview shares one `preview` branch, each with its own capped
+Anthropic API key. The Vercel project, the databases, every env var, the key caps and how to reset
+production: [`docs/deployment.md`](docs/deployment.md).
 
 ## Repository layout
 
