@@ -39,7 +39,7 @@ export function resolveRequestedDate(words: string, today: string): RequestedDat
       const named = weekdayIndex(weekday[2] ?? "");
       if (named !== dayOfWeek(explicit)) {
         const byWeekday = nextOccurrence(today, named);
-        const dates = [byWeekday, explicit].sort() as [string, string];
+        const dates: [string, string] = byWeekday < explicit ? [byWeekday, explicit] : [explicit, byWeekday];
         return {
           kind: "ambiguous",
           dates,
