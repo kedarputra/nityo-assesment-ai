@@ -350,7 +350,7 @@ function EditableLines({ proposal, busy, onEdit }: EditProps) {
   );
 }
 
-// A quantity is sent when the field is left or Enter is pressed, and only when it changed.
+// A quantity is sent when the field is left, by Enter or otherwise, and only when it changed.
 function QuantityField({
   line,
   busy,
@@ -380,7 +380,8 @@ function QuantityField({
       disabled={busy}
       onBlur={(event) => commit(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === "Enter") commit(event.currentTarget.value);
+        // Leaving the field commits it, so Enter only leaves it and the edit is sent once.
+        if (event.key === "Enter") event.currentTarget.blur();
       }}
     />
   );
