@@ -218,6 +218,8 @@ function headline(proposal: ProposalView): string {
       return `The order from ${proposal.customerName} was rejected`;
     case "held":
       return `The order from ${proposal.customerName} is on hold, ${total}`;
+    case "superseded":
+      return `The order from ${proposal.customerName} was replaced by a later run`;
     case "open":
       if (proposal.checks.some((check) => !check.passes && isHardRule(check.check))) {
         return `${proposal.customerName} can’t get this order yet (${total})`;
@@ -248,6 +250,7 @@ const DECISION_WORDS: Record<ProposalView["status"], { pill: string; icon: strin
   rejected: { pill: "rejected", icon: "✕", label: "Rejected" },
   held: { pill: "on_hold", icon: "◐", label: "On hold" },
   open: { pill: "needs_you", icon: "!", label: "Needs you" },
+  superseded: { pill: "no_action", icon: "–", label: "Replaced by a later run" },
 };
 
 // A requested date is a calendar day; noon at Harbor Point keeps it on that day in any zone.

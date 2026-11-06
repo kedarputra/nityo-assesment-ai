@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql, sum } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, sum } from "drizzle-orm";
 import type { Database } from "@/db/database";
 import {
   agentFlags,
@@ -662,6 +662,19 @@ export interface Release {
 // Creates the sales order and its lines and allocates the stock, which reduces `available`. The
 // caller holds the release lock and writes the audit event.
 export async function releaseOrder(tx: Database, release: Release): Promise<string> {
+  // Claimed first, so a Proposal that already has its order is never released a second time.
+  const claimed = await tx
+    .update(proposals)
+    .set({ status: "released" })
+    .where(
+      and(
+        eq(proposals.id, release.proposalId),
+        inArray(proposals.status, ["open", "held"]),
+        isNull(proposals.soNumber),
+      ),
+    )
+    .returning({ id: proposals.id });
+  if (claimed.length === 0) throw new Error(`Proposal ${release.proposalId} is already released or decided.`);
   const soNumber = await nextSoNumber(tx);
   await tx.insert(salesOrders).values({
     soNumber,
@@ -688,7 +701,7 @@ export async function releaseOrder(tx: Database, release: Release): Promise<stri
       .set({ allocated: sql`${inventory.allocated} + ${line.quantity}` })
       .where(eq(inventory.sku, line.sku));
   }
-  await tx.update(proposals).set({ status: "released", soNumber }).where(eq(proposals.id, release.proposalId));
+  await tx.update(proposals).set({ soNumber }).where(eq(proposals.id, release.proposalId));
   return soNumber;
 }
 

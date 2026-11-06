@@ -87,3 +87,14 @@ export function textIn(message: AssistantMessage): string {
     .map((block) => block.text)
     .join("");
 }
+
+// The model's spending limit is reached (Anthropic answers 400 "usage limits" or 429
+// `enforced_spend_limit_reached`). It stops the run and is never retried: every retry would fail
+// the same way until an admin raises the limit.
+export class SpendLimitReached extends Error {
+  override name = "SpendLimitReached";
+
+  constructor() {
+    super("The model's spending limit is reached.");
+  }
+}
