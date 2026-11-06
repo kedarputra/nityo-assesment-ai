@@ -1,7 +1,8 @@
-import type { RecordedCheck } from "@/db/schema";
+import Link from "next/link";
+import type { NoActionReason, RecordedCheck, RequestKind, RouteReason } from "@/db/schema";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
-import type { EmailWork, ProposalView } from "@/server/inbox/email-work";
+import type { EmailWork, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
 import { RunAgentButton } from "./agent-run";
 import { StatusPill } from "./status-pill";
@@ -21,6 +22,35 @@ const CHECK_NAMES: Record<string, string> = {
   "no-flags": "Nothing flagged",
 };
 
+// The kind tag's words (DESIGN.md, "Kind tag").
+const KIND_NAMES: Record<RequestKind, string> = {
+  "new order": "New order",
+  "order change": "Order change",
+  cancellation: "Cancellation",
+  return: "Return",
+  "billing dispute": "Billing dispute",
+  "quote request": "Quote request",
+  "order inquiry": "Order inquiry",
+  "no action": "No action",
+};
+
+// A routed Request's headline: what the person is being asked to handle.
+const ROUTED_HEADLINES: Record<RouteReason, string> = {
+  quote: "A quote request for you to answer",
+  return: "A return for you to decide",
+  billing: "A billing question for accounts",
+  inquiry: "A question about an earlier order",
+  prospect: "A new company wants to order",
+  "no-quantities": "An order that doesn’t say how many",
+  "missing-attachment": "An order whose attachment didn’t come through",
+};
+
+const NO_ACTION_REASONS: Record<NoActionReason, string> = {
+  spam: "It’s spam: nothing a customer asks of us.",
+  "auto-reply": "It’s an automatic reply, so there’s nothing to answer.",
+  duplicate: "It repeats an email whose order is already in.",
+};
+
 export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null; work: EmailWork | null }) {
   if (!email) return <NothingToDecide email={null} />;
   if (!work) return <NothingToDecide email={email} />;
@@ -30,10 +60,16 @@ export function ProposalPane({ email, work }: { email: InboxEmailWithBody | null
   return (
     <div className="proposal">
       <StatusPill status={email.status} />
+      {work.run.requestKinds.length > 0 ? <KindTags kinds={work.run.requestKinds} /> : null}
+      {work.noAction ? <NoActionCard noAction={work.noAction} /> : null}
       {work.proposals.map((proposal) => (
         <ProposalCard key={proposal.id} proposal={proposal} />
       ))}
+      {work.routed.map((request, index) => (
+        <RoutedCard key={index} request={request} />
+      ))}
       {work.flags.length > 0 ? <Flags flags={work.flags} /> : null}
+      {work.notes.length > 0 ? <Notes notes={work.notes} /> : null}
       {work.draftReply !== null ? <DraftReply body={work.draftReply} /> : null}
     </div>
   );
@@ -78,6 +114,68 @@ function RunDidNotFinish({ email, errorClass }: { email: InboxEmailWithBody; err
         {errorClass ? <p className="meta id">{errorClass}</p> : null}
       </div>
     </div>
+  );
+}
+
+function emailHref(emailId: string): string {
+  return `/?${new URLSearchParams({ filter: "all", email: emailId }).toString()}`;
+}
+
+function KindTags({ kinds }: { kinds: RequestKind[] }) {
+  return (
+    <ul className="tags" aria-label="What the email asks">
+      {kinds.map((kind) => (
+        <li key={kind} className="tag">
+          {KIND_NAMES[kind]}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// No lines and no gate: a routed Request changes nothing in the ERP; a person takes it from here.
+function RoutedCard({ request }: { request: RoutedRequestView }) {
+  return (
+    <article className="proposal-card">
+      <h2 className="headline">{ROUTED_HEADLINES[request.reason]}</h2>
+      <p className="meta">Routed to you · nothing changes in the ERP</p>
+      <div className="thinks reading">
+        <h3 className="who">What the agent thinks</h3>
+        <p>{request.summary}</p>
+      </div>
+    </article>
+  );
+}
+
+function NoActionCard({ noAction }: { noAction: NoActionView }) {
+  return (
+    <article className="proposal-card">
+      <h2 className="headline">No action needed</h2>
+      <p>{NO_ACTION_REASONS[noAction.reason]}</p>
+      {noAction.duplicateOf ? (
+        <p>
+          Same as <Link href={emailHref(noAction.duplicateOf)}>{noAction.duplicateOf}</Link>.
+        </p>
+      ) : null}
+      <p className="meta">{noAction.note}</p>
+    </article>
+  );
+}
+
+function Notes({ notes }: { notes: EmailWork["notes"] }) {
+  return (
+    <section className="thinks" aria-label="From other emails">
+      <h3 className="who">From other emails</h3>
+      <ul className="checks">
+        {notes.map((note, index) => (
+          <li key={index}>
+            <span>
+              <Link href={emailHref(note.sourceEmailId)}>{note.sourceEmailId}</Link> {note.note}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

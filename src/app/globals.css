@@ -865,6 +865,41 @@ ul.rows {
   justify-self: start;
 }
 
+/* Kind tags (DESIGN.md, "Kind tag") */
+.tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.tag {
+  display: inline-block;
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+  font: 500 13px/1.4 var(--sans);
+  background: var(--sunken);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* What the agent thinks (DESIGN.md, "Components") */
+.thinks {
+  background: var(--accent-soft);
+  border-radius: var(--r-lg);
+  padding: var(--s4) var(--s5);
+  display: grid;
+  gap: var(--s1);
+  overflow-wrap: anywhere;
+}
+
+.thinks .who {
+  font: 600 14px/1.35 var(--sans);
+  color: var(--accent);
+}
+
 .proposal-card {
   display: grid;
   gap: var(--s3);

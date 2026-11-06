@@ -5,17 +5,23 @@ import {
   agentRuns,
   customers,
   draftReplies,
+  emailNotes,
   products,
   proposalLines,
   proposals,
+  routedRequests,
   shipToAddresses,
   type AgentRunOutcome,
+  type NoActionReason,
   type ProposalStatus,
   type RecordedCheck,
+  type RequestKind,
+  type RouteReason,
 } from "@/db/schema";
 
-// What the agent did with one email, for the Proposal pane: its latest run, the Proposals that
-// run made with their checks and lines, its flags and its Draft reply.
+// What the agent did with one email, for the Proposal pane: its latest run and the Request kinds
+// it found, the Proposals that run made with their checks and lines, the Requests it routed to a
+// person or why it closed the email, its flags, its Draft reply, and notes other emails left here.
 
 export interface ProposalLineView {
   lineNo: number;
@@ -40,11 +46,34 @@ export interface ProposalView {
   lines: ProposalLineView[];
 }
 
+export interface RoutedRequestView {
+  kind: RequestKind;
+  reason: RouteReason;
+  summary: string;
+}
+
+export interface NoActionView {
+  reason: NoActionReason;
+  note: string;
+  // The email a duplicate repeats.
+  duplicateOf: string | null;
+}
+
 export interface EmailWork {
-  run: { runId: string; finished: boolean; outcome: AgentRunOutcome | null; errorClass: string | null };
+  run: {
+    runId: string;
+    finished: boolean;
+    outcome: AgentRunOutcome | null;
+    errorClass: string | null;
+    requestKinds: RequestKind[];
+  };
   proposals: ProposalView[];
+  routed: RoutedRequestView[];
+  noAction: NoActionView | null;
   flags: { code: string; note: string }[];
   draftReply: string | null;
+  // Information another email carries for this one's Requests (U17), whichever run left it.
+  notes: { sourceEmailId: string; note: string }[];
 }
 
 export async function findEmailWork(db: Database, emailId: string): Promise<EmailWork | null> {
@@ -96,6 +125,11 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
           )
           .orderBy(asc(proposalLines.proposalId), asc(proposalLines.lineNo));
 
+  const routed = await db
+    .select({ kind: routedRequests.kind, reason: routedRequests.reason, summary: routedRequests.summary })
+    .from(routedRequests)
+    .where(eq(routedRequests.runId, run.runId))
+    .orderBy(asc(routedRequests.id));
   const flags = await db
     .select({ code: agentFlags.code, note: agentFlags.note })
     .from(agentFlags)
@@ -107,9 +141,20 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
     .where(eq(draftReplies.runId, run.runId))
     .orderBy(desc(draftReplies.id))
     .limit(1);
+  const notes = await db
+    .select({ sourceEmailId: emailNotes.sourceEmailId, note: emailNotes.note })
+    .from(emailNotes)
+    .where(eq(emailNotes.emailId, emailId))
+    .orderBy(asc(emailNotes.id));
 
   return {
-    run: { runId: run.runId, finished: run.endedAt !== null, outcome: run.outcome, errorClass: run.errorClass },
+    run: {
+      runId: run.runId,
+      finished: run.endedAt !== null,
+      outcome: run.outcome,
+      errorClass: run.errorClass,
+      requestKinds: run.requestKinds,
+    },
     proposals: proposalRows.map((proposal) => ({
       ...proposal,
       lines: lineRows
@@ -124,7 +169,13 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
           lineTotalCents: line.unitPriceCents === null ? null : line.unitPriceCents * line.quantity,
         })),
     })),
+    routed,
+    noAction:
+      run.noActionReason === null
+        ? null
+        : { reason: run.noActionReason, note: run.noActionNote ?? "", duplicateOf: run.duplicateOfEmailId },
     flags,
     draftReply: reply?.body ?? null,
+    notes,
   };
 }

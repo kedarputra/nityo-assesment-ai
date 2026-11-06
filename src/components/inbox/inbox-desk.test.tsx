@@ -189,7 +189,7 @@ const allChecksPass = [
 
 // E001 as the agent leaves it: released as SO-24059 with a confirmation Draft reply.
 const e001Released: EmailWork = {
-  run: { runId: "run-1", finished: true, outcome: "released", errorClass: null },
+  run: { runId: "run-1", finished: true, outcome: "released", errorClass: null, requestKinds: ["new order"] },
   proposals: [
     {
       id: 1,
@@ -214,8 +214,11 @@ const e001Released: EmailWork = {
       ],
     },
   ],
+  routed: [],
+  noAction: null,
   flags: [],
   draftReply: "Hi Maria, SO-24059 is confirmed for Thursday.",
+  notes: [],
 };
 
 describe("InboxDesk, the Proposal pane after a run", () => {
@@ -273,10 +276,13 @@ describe("InboxDesk, the Proposal pane after a run", () => {
   it("says calmly when a run did not finish", () => {
     const failed: InboxEmailWithBody = { ...maria, status: "failed" };
     const work: EmailWork = {
-      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "call-cap" },
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "call-cap", requestKinds: [] },
       proposals: [],
+      routed: [],
+      noAction: null,
       flags: [],
       draftReply: null,
+      notes: [],
     };
 
     const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
@@ -288,15 +294,97 @@ describe("InboxDesk, the Proposal pane after a run", () => {
   it("shows Reading… while a run is under way", () => {
     const reading: InboxEmailWithBody = { ...maria, status: "reading" };
     const work: EmailWork = {
-      run: { runId: "run-1", finished: false, outcome: null, errorClass: null },
+      run: { runId: "run-1", finished: false, outcome: null, errorClass: null, requestKinds: [] },
       proposals: [],
+      routed: [],
+      noAction: null,
       flags: [],
       draftReply: null,
+      notes: [],
     };
 
     const html = renderDesk({ emails: [listed(reading)], query: { emailId: "E001" }, selected: reading, work });
 
     expect(html).toContain('<span class="pill pill--reading"><span aria-hidden="true">…</span>Reading…</span>');
     expect(html).toContain("The agent is reading this email");
+  });
+});
+
+describe("InboxDesk, routed and no-action emails", () => {
+  const ben: InboxEmailWithBody = {
+    emailId: "E009",
+    receivedAt: new Date("2026-11-02T07:52:00-05:00"),
+    fromName: "Ben Carter",
+    fromEmail: "taproom@lakesidebrew.example",
+    subject: "Quote please",
+    body: "Can you quote me 20 cs of the 16 oz clear cups? Not ordering yet.",
+    status: "needs_you",
+  };
+  const grace: InboxEmailWithBody = {
+    emailId: "E016",
+    receivedAt: new Date("2026-11-02T09:22:00-05:00"),
+    fromName: "Grace Kim",
+    fromEmail: "purchasing@seasideseniorliving.example",
+    subject: "FW: PO SSL-7781",
+    body: "Resending in case the first one didn't come through.",
+    status: "no_action",
+  };
+  const nothingElse = { proposals: [], routed: [], noAction: null, flags: [], draftReply: null, notes: [] };
+
+  it("shows a routed Request as Needs you, with its kind, summary and Draft reply, and no lines or gate", () => {
+    const work: EmailWork = {
+      ...nothingElse,
+      run: { runId: "run-9", finished: true, outcome: "routed", errorClass: null, requestKinds: ["quote request"] },
+      routed: [{ kind: "quote request", reason: "quote", summary: "Ben wants a quote: $1,980.00 at list." }],
+      draftReply: "Hi Ben, here is your quote.",
+    };
+
+    const html = renderDesk({ emails: [listed(ben)], query: { emailId: "E009" }, selected: ben, work });
+
+    expect(html).toContain('<span class="pill pill--needs_you"><span aria-hidden="true">!</span>Needs you</span>');
+    expect(html).toContain('<li class="tag">Quote request</li>');
+    expect(html).toContain('<h2 class="headline">A quote request for you to answer</h2>');
+    expect(html).toContain("Ben wants a quote: $1,980.00 at list.");
+    expect(html).toContain("Hi Ben, here is your quote.</textarea>");
+    expect(html).not.toContain('class="lines"');
+    expect(html).not.toContain("Why it’s waiting for you");
+    expect(html).not.toContain("look good");
+  });
+
+  it("shows a duplicate as No action needed, with its reason and a link to the original email", () => {
+    const work: EmailWork = {
+      ...nothingElse,
+      run: { runId: "run-16", finished: true, outcome: "no_action", errorClass: null, requestKinds: ["no action"] },
+      noAction: { reason: "duplicate", note: "A resend of PO SSL-7781.", duplicateOf: "E015" },
+    };
+
+    const html = renderDesk({ emails: [listed(grace)], query: { emailId: "E016" }, selected: grace, work });
+
+    expect(html).toContain('<span class="pill pill--no_action"><span aria-hidden="true">–</span>No action needed</span>');
+    expect(html).toContain('<li class="tag">No action</li>');
+    expect(html).toContain("It repeats an email whose order is already in.");
+    expect(html).toContain('Same as <a href="/?filter=all&amp;email=E015">E015</a>.');
+    expect(html).toContain("A resend of PO SSL-7781.");
+    expect(html).not.toContain('id="draft-reply"');
+  });
+
+  it("shows both of E027’s Requests and the notes other emails left", () => {
+    const [proposal] = e001Released.proposals;
+    if (!proposal) throw new Error("no proposal");
+    const work: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal", requestKinds: ["new order", "order inquiry"] },
+      proposals: [{ ...proposal, status: "open", soNumber: null }],
+      routed: [{ kind: "order inquiry", reason: "inquiry", summary: "No order on file for C014." }],
+      notes: [{ sourceEmailId: "E028", note: "Away until 9 November." }],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: waiting, work });
+
+    expect(html).toContain('<li class="tag">New order</li><li class="tag">Order inquiry</li>');
+    expect(html).toContain('<h2 class="headline">A question about an earlier order</h2>');
+    expect(html).toContain('class="lines"');
+    expect(html).toContain('<a href="/?filter=all&amp;email=E028">E028</a> Away until 9 November.');
   });
 });

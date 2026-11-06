@@ -12,6 +12,7 @@ import {
 import type { ModelResponse } from "@/model/model";
 import { ScriptedModel, callsTool, repliesWith } from "@/model/scripted-model";
 import { ingestSnapshot } from "@/snapshot/snapshot";
+import { findEmailWork } from "@/server/inbox/email-work";
 import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { runAgent } from "./run-agent";
 
@@ -91,6 +92,12 @@ describe("Requests that are routed or need no action", () => {
     ]);
 
     await expectRouted(result, { kind: "quote request", reason: "quote", reply: /\$82\/case[\s\S]*13 November/ });
+    expect(await findEmailWork(testDatabase.db, "E009")).toMatchObject({
+      run: { outcome: "routed", requestKinds: ["quote request"] },
+      proposals: [],
+      routed: [{ kind: "quote request", reason: "quote" }],
+      noAction: null,
+    });
     expect(await available("HPS-1405")).toBe(0);
     expect(await available("HPS-1406")).toBe(30);
   });
@@ -254,6 +261,11 @@ describe("Requests that are routed or need no action", () => {
     expect(ssl7781).toHaveLength(1);
     expect(await available("HPS-1103")).toBe(65);
     expect(await repliesOf(e016.summary.runId)).toEqual([]);
+    expect(await findEmailWork(testDatabase.db, "E016")).toMatchObject({
+      run: { outcome: "no_action", requestKinds: ["no action"] },
+      noAction: { reason: "duplicate", duplicateOf: "E015" },
+      draftReply: null,
+    });
   });
 
   it("refuses to close a duplicate of an email whose order is not in the system yet", async () => {
@@ -308,6 +320,9 @@ describe("Requests that are routed or need no action", () => {
       { emailId: "E033", sourceEmailId: "E028", note: "Karen Liu is away until 9 November; for urgent matters call the front desk." },
     ]);
     expect(await repliesOf(e028.summary.runId)).toEqual([]);
+    expect((await findEmailWork(testDatabase.db, "E033"))?.notes).toEqual([
+      { sourceEmailId: "E028", note: "Karen Liu is away until 9 November; for urgent matters call the front desk." },
+    ]);
   });
 
   it("closes E029 as spam, not as a prospect", async () => {
