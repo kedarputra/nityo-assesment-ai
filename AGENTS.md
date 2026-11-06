@@ -76,6 +76,14 @@ acceptance criteria must include real targets, and no other ticket should merge 
 money. The model sits behind an interface that tests replace with a fake. A live run of the agent
 over the 40 emails is an evaluation script a human runs, and its output feeds `docs/results.md`.
 
+## Design
+
+Every screen follows [`DESIGN.md`](DESIGN.md): its tokens, type, components, keys and states. The
+living example is Variant A of
+[`prototype-review-ui.html`](grilled/hp-1-order-intake/assets/prototype-review-ui.html); match it,
+but rebuild it properly (it is prototype code). A UI ticket that needs something `DESIGN.md` does
+not cover says so in its acceptance criteria instead of inventing a second style.
+
 ## Agent skills
 
 Skills live in `.agents/skills/`, mirrored to `.claude/skills/` for Claude Code. Both are managed by
