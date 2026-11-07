@@ -25,7 +25,7 @@ export class InboxRunRefused extends Error {
 export const RUN_ALL_ALREADY_GOING = "Run all is already going. Let it finish, or stop it first.";
 export const INBOX_RUN_ENDED = "This Run all has stopped. Press Run all to carry on from where it got to.";
 // DESIGN.md, "Voice and words": the calm words for a spend limit.
-export const SPEND_LIMIT_MESSAGE = "The model’s spending limit is reached, so runs are paused. Ask an admin to raise it.";
+export const SPEND_LIMIT_MESSAGE = "The model’s limit is used up for now, so runs are paused. A free key’s daily quota comes back on its own; a paid key needs its spend limit raised.";
 
 // An email Run all reads: one the agent has not run on, or whose latest run did not finish.
 export function isUnprocessed(status: InboxStatus): boolean {

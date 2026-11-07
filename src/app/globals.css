@@ -1245,6 +1245,12 @@ ul.rows {
 .lines .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  /* Amounts, quantities and "contract" never break; the product name takes the wrapping. */
+  white-space: nowrap;
+}
+
+.lines .num .meta {
+  display: block;
 }
 
 .lines .sub {

@@ -58,6 +58,15 @@ function withoutKey(map: ReadonlyMap<string, string>, key: string): ReadonlyMap<
   return next;
 }
 
+// While this browser has the agent reading the email (its button, or Run all), the pane shows
+// `reading` in place of what an earlier run left, so an old failure never sits beside "Reading…".
+export function UnlessReading({ emailId, reading, children }: { emailId: string; reading: ReactNode; children: ReactNode }) {
+  const runs = useContext(AgentRunsContext);
+  const inboxRun = useInboxRun();
+  const busy = runs?.reading.has(emailId) || inboxRun?.reading?.emailId === emailId;
+  return busy ? reading : children;
+}
+
 export function RowStatus({ emailId, status }: { emailId: string; status: InboxStatus }) {
   const runs = useContext(AgentRunsContext);
   const inboxRun = useInboxRun();
