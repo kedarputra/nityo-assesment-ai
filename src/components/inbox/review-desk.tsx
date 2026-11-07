@@ -10,6 +10,7 @@ import {
   useState,
   useTransition,
   type ReactNode,
+  type RefObject,
 } from "react";
 import type { InboxFilter, InboxView } from "@/server/inbox/inbox";
 import { undoReleaseAction, type ReviewActionResult } from "@/server/review/actions";
@@ -57,6 +58,25 @@ export function ReviewDeskProvider({ filter, view, shownIds, selectedId, childre
   const [toast, setToast] = useState<Toast | null>(null);
   const [undoing, startUndo] = useTransition();
   const keysRef = useRef<DecisionKeys | null>(null);
+  const keyListRef = useRef<HTMLDialogElement | null>(null);
+
+  // The list follows the selection, so `j`, `k`, a deep link or coming back from an email on a
+  // phone always shows the selected row ("nearest" leaves a row that is already visible alone).
+  // A phone opening an email starts at the top of it, with "← All emails" in view.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const phone = window.matchMedia("(max-width: 767px)").matches;
+      if (view === "detail" && phone) {
+        window.scrollTo({ top: 0 });
+        return;
+      }
+      if (selectedId !== null) {
+        // Back on a phone's list, the email you came from sits in the middle, not on the edge.
+        document.querySelector('.row[aria-current="true"]')?.scrollIntoView({ block: phone ? "center" : "nearest" });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedId, view]);
 
   const go = useCallback(
     (emailId: string | null) => {
@@ -117,6 +137,12 @@ export function ReviewDeskProvider({ filter, view, shownIds, selectedId, childre
         case "h":
           keys?.hold?.();
           return;
+        case "?": {
+          const keyList = keyListRef.current;
+          if (keyList?.open) keyList.close();
+          else keyList?.showModal();
+          return;
+        }
       }
     }
     document.addEventListener("keydown", onKey);
@@ -126,6 +152,7 @@ export function ReviewDeskProvider({ filter, view, shownIds, selectedId, childre
   return (
     <ReviewDeskContext.Provider value={{ decided, setDecisionKeys }}>
       {children}
+      <KeyList dialogRef={keyListRef} />
       <div className="toast-region" aria-live="polite">
         {toast ? (
           <div className="toast">
@@ -146,6 +173,43 @@ export function ReviewDeskProvider({ filter, view, shownIds, selectedId, childre
         ) : null}
       </div>
     </ReviewDeskContext.Provider>
+  );
+}
+
+const KEYS: [string, string][] = [
+  ["j", "Next email"],
+  ["k", "Previous email"],
+  ["a", "Approve the open Proposal"],
+  ["r", "Reject it, with a reason"],
+  ["h", "Hold it, with a reason"],
+  ["?", "Show or hide these keys"],
+];
+
+// `?` opens the list of keys (DESIGN.md, "Interaction"); a native dialog keeps focus inside it
+// and closes on Esc.
+function KeyList({ dialogRef }: { dialogRef: RefObject<HTMLDialogElement | null> }) {
+  return (
+    <dialog ref={dialogRef} className="key-list" aria-labelledby="key-list-title">
+      <h2 id="key-list-title" className="headline">
+        Keyboard keys
+      </h2>
+      <dl>
+        {KEYS.map(([key, action]) => (
+          <div key={key}>
+            <dt>
+              <kbd>{key}</kbd>
+            </dt>
+            <dd>{action}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="meta">Keys work on a wide screen, and never while you’re typing.</p>
+      <form method="dialog">
+        <button type="submit" className="btn">
+          Close
+        </button>
+      </form>
+    </dialog>
   );
 }
 

@@ -38,6 +38,20 @@ describe("gateRequest", () => {
     expect(location.searchParams.get("next")).toBe("/emails/E005?view=detail");
   });
 
+  it("keeps a deep link into the inbox, which lives on / with the email in its query", async () => {
+    const response = await gateRequest(request("/?filter=all&email=E020&view=detail"), findSessionUser);
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.get("next")).toBe("/?filter=all&email=E020&view=detail");
+  });
+
+  it("sends a bare / to sign-in without a next", async () => {
+    const response = await gateRequest(request("/"), findSessionUser);
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.has("next")).toBe(false);
+  });
+
   it("redirects an unknown or expired session and clears its cookie", async () => {
     const response = await gateRequest(request("/", { token: "expired-token" }), findSessionUser);
 
@@ -123,6 +137,13 @@ describe("safeReturnPath", () => {
     ["https://evil.example", "/"],
     ["//evil.example", "/"],
     ["/\\evil.example", "/"],
+    ["/?filter=all&email=E020&view=detail", "/?filter=all&email=E020&view=detail"],
+    // Browsers strip tab and newline, so these would become "//evil.example" (found in QA).
+    ["/\t/evil.example", "/"],
+    ["/\n/evil.example", "/"],
+    ["/\r/evil.example", "/"],
+    ["/x\\..\\..\\evil.example", "/"],
+    ["/%2F/evil.example", "/%2F/evil.example"],
   ])("sends %s to %s", (next, expected) => {
     expect(safeReturnPath(next)).toBe(expected);
   });

@@ -1,4 +1,3 @@
-import Form from "next/form";
 import Link from "next/link";
 import { formatBusinessDay, formatBusinessTime } from "@/lib/business-clock";
 import { dismissTipAction } from "@/server/inbox/actions";
@@ -31,6 +30,8 @@ export interface InboxDeskProps {
   tipDismissed: boolean;
   // False when the deploy has no Anthropic key: the desk works, the agent does not run.
   agentOn: boolean;
+  // The URL asked for an email that is not in today's inbox.
+  notFound?: boolean;
 }
 
 const FILTER_NAMES: Record<InboxFilter, string> = {
@@ -40,9 +41,21 @@ const FILTER_NAMES: Record<InboxFilter, string> = {
   other: "Other",
 };
 
-// The three-pane desk (DESIGN.md, "Layout and responsiveness"). The URL holds its state, so
-// every control is a GET form: a native button that works before the page's script loads.
-export function InboxDesk({ query, emails, counts, shown, selected, work, tipDismissed, agentOn }: InboxDeskProps) {
+// The three-pane desk (DESIGN.md, "Layout and responsiveness"). The URL holds its state, so the
+// rows and filters are links: they work before the page's script loads, and next/link prefetches
+// them. (next/form was used here first, but it drops the clicked button's name=value, so a row
+// click never reached the URL.)
+export function InboxDesk({
+  query,
+  emails,
+  counts,
+  shown,
+  selected,
+  work,
+  tipDismissed,
+  agentOn,
+  notFound = false,
+}: InboxDeskProps) {
   return (
     <AgentRunsProvider>
       <ReviewDeskProvider
@@ -59,12 +72,17 @@ export function InboxDesk({ query, emails, counts, shown, selected, work, tipDis
             <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
           </section>
           <div className="desk-back">
-            <Link className="btn btn--ghost" href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}>
+            {/* No scroll to the top: the desk brings the email you came from back into view. */}
+            <Link
+              className="btn btn--ghost"
+              href={inboxHref({ filter: query.filter, emailId: selected?.emailId ?? null })}
+              scroll={false}
+            >
               ← All emails
             </Link>
           </div>
           <section className="desk-pane desk-pane--email" aria-label="Email">
-            {selected ? <EmailDetail email={selected} /> : <NoEmailChosen />}
+            {selected ? <EmailDetail email={selected} /> : <NoEmailChosen notFound={notFound} />}
           </section>
           <section className="desk-pane desk-pane--proposal" aria-label="Proposal">
             <ProposalPane email={selected} work={work} agentOn={agentOn} />
@@ -75,9 +93,18 @@ export function InboxDesk({ query, emails, counts, shown, selected, work, tipDis
   );
 }
 
-function inboxHref({ filter, emailId }: { filter: InboxFilter; emailId: string | null }): string {
+function inboxHref({
+  filter,
+  emailId,
+  view,
+}: {
+  filter: InboxFilter;
+  emailId: string | null;
+  view?: "detail";
+}): string {
   const params = new URLSearchParams({ filter });
   if (emailId) params.set("email", emailId);
+  if (view) params.set("view", view);
   return `${INBOX_PATH}?${params.toString()}`;
 }
 
@@ -103,6 +130,7 @@ function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: bool
       </div>
       <p className="meta">
         {handled} of {total} handled
+        <span className="hide-tablet"> · Press <kbd>?</kbd> for keyboard keys</span>
       </p>
     </div>
   );
@@ -132,22 +160,20 @@ function TipCard() {
 
 function FilterBar({ query, counts }: { query: InboxQuery; counts: Record<InboxFilter, number> }) {
   return (
-    <Form action={INBOX_PATH} className="filters" aria-label="Show">
-      {query.emailId ? <input type="hidden" name="email" value={query.emailId} /> : null}
+    <div className="filters" role="group" aria-label="Show">
       {inboxFilters.map((filter) => (
-        <button
+        <Link
           key={filter}
-          type="submit"
-          name="filter"
-          value={filter}
+          href={inboxHref({ filter, emailId: query.emailId })}
           className="filter"
-          aria-pressed={query.filter === filter}
+          aria-current={query.filter === filter ? "true" : undefined}
+          scroll={false}
         >
           {FILTER_NAMES[filter]}
           <span className="filter-count">{counts[filter]}</span>
-        </button>
+        </Link>
       ))}
-    </Form>
+    </div>
   );
 }
 
@@ -161,23 +187,23 @@ function EmailList({ query, shown, selectedId }: { query: InboxQuery; shown: Inb
   }
 
   return (
-    <Form action={INBOX_PATH}>
-      <input type="hidden" name="filter" value={query.filter} />
-      <input type="hidden" name="view" value="detail" />
-      <ul className="rows">
-        {shown.map((email) => (
-          <li key={email.emailId}>
-            <EmailRow email={email} selected={email.emailId === selectedId} />
-          </li>
-        ))}
-      </ul>
-    </Form>
+    <ul className="rows">
+      {shown.map((email) => (
+        <li key={email.emailId}>
+          <EmailRow
+            email={email}
+            href={inboxHref({ filter: query.filter, emailId: email.emailId, view: "detail" })}
+            selected={email.emailId === selectedId}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function EmailRow({ email, selected }: { email: InboxEmail; selected: boolean }) {
+function EmailRow({ email, href, selected }: { email: InboxEmail; href: string; selected: boolean }) {
   return (
-    <button type="submit" name="email" value={email.emailId} className="row" aria-current={selected ? "true" : undefined}>
+    <Link href={href} className="row" aria-current={selected ? "true" : undefined}>
       <Avatar name={email.fromName} />
       <span className="row-body">
         <span className="row-top">
@@ -191,7 +217,7 @@ function EmailRow({ email, selected }: { email: InboxEmail; selected: boolean })
           <RowStatus emailId={email.emailId} status={email.status} />
         </span>
       </span>
-    </button>
+    </Link>
   );
 }
 
@@ -218,10 +244,10 @@ function EmailDetail({ email }: { email: InboxEmailWithBody }) {
   );
 }
 
-function NoEmailChosen() {
+function NoEmailChosen({ notFound }: { notFound: boolean }) {
   return (
     <div className="pane-empty">
-      <h2 className="title">No email chosen</h2>
+      <h2 className="title">{notFound ? "That email isn’t in today’s inbox" : "No email chosen"}</h2>
       <p className="meta">Choose an email from the list to read it here.</p>
     </div>
   );

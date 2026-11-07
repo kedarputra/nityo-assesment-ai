@@ -242,6 +242,7 @@ header .right {
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -876,6 +877,9 @@ nav.tabs a[aria-current="page"] {
 }
 
 .filter {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   font: 600 14px var(--sans);
   border: 1px solid var(--hairline);
   background: var(--surface);
@@ -893,7 +897,7 @@ nav.tabs a[aria-current="page"] {
   }
 }
 
-.filter[aria-pressed="true"] {
+.filter[aria-current="true"] {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--surface);
@@ -913,7 +917,7 @@ nav.tabs a[aria-current="page"] {
   color: var(--ink-muted);
 }
 
-/* Email rows: the whole row is one button, at least 64px tall. */
+/* Email rows: the whole row is one link, at least 64px tall. */
 ul.rows {
   list-style: none;
   margin: 0;
@@ -934,6 +938,7 @@ ul.rows {
   border-left: 3px solid transparent;
   border-radius: var(--r-md);
   cursor: pointer;
+  text-decoration: none;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -1415,4 +1420,66 @@ kbd {
   nav.tabs a {
     padding: 0 var(--s1);
   }
+
+  .wordmark {
+    font-size: 15px;
+  }
+
+  .top .btn--ghost {
+    padding: 0 var(--s1);
+  }
+}
+
+/* The list of keys, opened with "?" on a desk */
+.key-list {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--pop);
+  padding: var(--s5);
+  width: min(360px, calc(100vw - 32px));
+}
+
+.key-list::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.key-list dl {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s4) 0;
+}
+
+.key-list dl div {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: center;
+}
+
+.key-list dd {
+  margin: 0;
+}
+
+.key-list form {
+  margin-top: var(--s4);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Header buttons and long sender addresses never break the layout */
+.top .btn {
+  white-space: nowrap;
+}
+
+.email-head-text .meta {
+  overflow-wrap: anywhere;
+}
+
+.not-found {
+  max-width: 440px;
+  margin: var(--s7) auto 0;
+  display: grid;
+  gap: var(--s3);
+  justify-items: start;
 }

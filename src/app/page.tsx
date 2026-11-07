@@ -24,8 +24,10 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
 
   const [emails, tipDismissed] = await Promise.all([listInboxEmails(db), isTipDismissed(db, user.id)]);
   const shown = emails.filter((email) => isInFilter(email, query.filter));
-  // With no email in the URL, the desk opens the first one the filter shows.
-  const selectedId = query.emailId ?? shown[0]?.emailId ?? null;
+  // With no email in the URL, the desk opens the first one the filter shows. An email the URL asks
+  // for that is not in today's inbox (E999, or not an id at all) opens nothing, and says so.
+  const askedFor = (await searchParams).email;
+  const selectedId = query.emailId ?? (askedFor === undefined ? (shown[0]?.emailId ?? null) : null);
   const [selected, work] = selectedId
     ? await Promise.all([findInboxEmail(db, selectedId), findEmailWork(db, selectedId)])
     : [null, null];
@@ -40,6 +42,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
       work={work}
       tipDismissed={tipDismissed}
       agentOn={isAgentConfigured()}
+      notFound={askedFor !== undefined && selected === null}
     />
   );
 }
