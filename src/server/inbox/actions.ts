@@ -7,7 +7,7 @@ import { AgentRunRefused, runAgent, type AgentRunSummary } from "@/agent/run-age
 import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
 import { getDatabase, withOwnerDatabase } from "@/db/client";
 import { AGENT_OFF_MESSAGE, isAgentConfigured } from "@/model/agent-switch";
-import { AnthropicModel, modelIdFromEnv } from "@/model/anthropic-model";
+import { configuredModel } from "@/model/configured-model";
 import { requireRole } from "@/server/auth/current-user";
 import { RateLimited, takeRateLimit } from "@/server/rate-limits";
 import { dismissTip } from "./inbox";
@@ -48,11 +48,12 @@ export async function runAgentAction(emailId: string): Promise<RunAgentResult> {
   const parsed = emailIdInput.safeParse(emailId);
   if (!parsed.success) return { ok: false, message: "That email isn’t in today’s inbox." };
   // Refused before any write, so a deploy without a key records no failed Agent runs.
-  if (!isAgentConfigured()) return { ok: false, message: AGENT_OFF_MESSAGE };
+  const configured = configuredModel();
+  if (configured === null) return { ok: false, message: AGENT_OFF_MESSAGE };
 
-  const modelId = modelIdFromEnv();
+  const modelId = configured.choice.modelId;
   try {
-    const summary = await runAgent(getDatabase(), new AnthropicModel({ modelId }), {
+    const summary = await runAgent(getDatabase(), configured.model, {
       emailId: parsed.data,
       modelId,
       startedBy: user.id,
@@ -97,11 +98,12 @@ export async function runInboxEmailAction(input: unknown): Promise<InboxRunStepR
   const user = await requireRole("admin");
   const parsed = stepInput.safeParse(input);
   if (!parsed.success) return { ok: false, stop: true, message: "That request didn’t make sense to the server. Reload the page and try again." };
-  if (!isAgentConfigured()) return { ok: false, stop: true, message: AGENT_OFF_MESSAGE };
+  const configured = configuredModel();
+  if (configured === null) return { ok: false, stop: true, message: AGENT_OFF_MESSAGE };
 
-  const modelId = modelIdFromEnv();
+  const modelId = configured.choice.modelId;
   try {
-    const summary = await runInboxRunStep(getDatabase(), new AnthropicModel({ modelId }), {
+    const summary = await runInboxRunStep(getDatabase(), configured.model, {
       ...parsed.data,
       userId: user.id,
       modelId,

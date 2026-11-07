@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { DEFAULT_ANTHROPIC_MODEL_ID } from "./agent-switch";
 import {
   SpendLimitReached,
   type AssistantMessage,
@@ -10,7 +11,7 @@ import {
   type ToolDefinition,
 } from "./model";
 
-export const DEFAULT_MODEL_ID = "claude-opus-5-5";
+export const DEFAULT_MODEL_ID = DEFAULT_ANTHROPIC_MODEL_ID;
 
 // Large enough that a turn with reasoning and several tool calls is not cut off, and small
 // enough for a non-streaming request to stay inside the SDK's HTTP timeout.
@@ -18,7 +19,7 @@ const MAX_TOKENS = 16_000;
 
 export function modelIdFromEnv(env: Record<string, string | undefined> = process.env): string {
   const configured = env.ANTHROPIC_MODEL?.trim();
-  return configured ? configured : DEFAULT_MODEL_ID;
+  return configured ? configured : DEFAULT_ANTHROPIC_MODEL_ID;
 }
 
 /** The one part of the SDK client this model uses; tests hand in a stub. */

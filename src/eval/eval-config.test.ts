@@ -7,9 +7,15 @@ const localEnv = {
 };
 
 describe("the eval's configuration", () => {
-  it("refuses to run without an Anthropic API key", () => {
+  it("refuses to run without a model key", () => {
     expect(() => evalConfigFromEnv({ ...localEnv, ANTHROPIC_API_KEY: " " })).toThrow(EvalRefused);
-    expect(() => evalConfigFromEnv({ ...localEnv, ANTHROPIC_API_KEY: undefined })).toThrow(/ANTHROPIC_API_KEY/);
+    expect(() => evalConfigFromEnv({ ...localEnv, ANTHROPIC_API_KEY: undefined })).toThrow(/ANTHROPIC_API_KEY nor GEMINI_API_KEY/);
+  });
+
+  it("runs Gemini's free tier when only its key is set", () => {
+    const config = evalConfigFromEnv({ ...localEnv, ANTHROPIC_API_KEY: undefined, GEMINI_API_KEY: "g" });
+    expect(config.choice).toEqual({ provider: "gemini", modelId: "gemini-3.8-flash" });
+    expect(config.modelId).toBe("gemini-3.8-flash");
   });
 
   it("refuses a database that is not on this machine, because each round resets it", () => {

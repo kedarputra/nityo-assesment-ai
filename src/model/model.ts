@@ -19,6 +19,9 @@ export interface ToolCall {
   id: string;
   name: string;
   input: unknown;
+  // What a provider attaches to the call and needs back unchanged on the next turn (Gemini's
+  // thought signature). Opaque to the agent.
+  providerData?: unknown;
 }
 
 export interface ToolResult {

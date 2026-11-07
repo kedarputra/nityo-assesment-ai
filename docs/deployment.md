@@ -109,6 +109,8 @@ a local run. None is committed.
 | `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset`, the in-app Reset | Neon `main`, direct (injected) | Neon `preview`, direct |
 | `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production`, or unset (below) | key from `harbor-point-preview`, or unset |
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
+| `GEMINI_API_KEY` | the agent, when `ANTHROPIC_API_KEY` is unset | free key from Google AI Studio, or unset | same, or unset |
+| `GEMINI_MODEL` | the agent | optional; `gemini-3.8-flash` when unset | same |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
 | `SEED_ADMIN_PASSWORD` | the user seed | `admin`'s password, 12+ characters | its own value |
 | `SEED_ASSESSOR_USERNAME` | the user seed | the assessors' username | same or its own |
@@ -137,7 +139,16 @@ the agent is to stop the run with the calm message from `DESIGN.md`, never retry
 
 No test, `make verify` or `make check` calls the model, so CI needs no key.
 
-**Without a key the agent is off, and nothing else changes.** Leave `ANTHROPIC_API_KEY` unset (or
+**The agent for free: Gemini.** With `ANTHROPIC_API_KEY` unset and `GEMINI_API_KEY` set, the
+agent runs on Gemini's free tier through its OpenAI-compatible endpoint
+([`src/model/openai-compatible-model.ts`](../src/model/openai-compatible-model.ts)). Create the key
+at aistudio.google.com/apikey (no card), add it in Vercel → Settings → Environment Variables for
+Production, and redeploy. The free tier is rate-limited: a per-minute limit is waited out and
+retried (up to three times, 30 s at most each); a per-day limit stops the run with the spend-limit
+message until the quota resets at midnight Pacific. Free-tier prompts may be used by Google to
+improve its products; the data pack is fictional. Anthropic wins when both keys are set.
+
+**Without a key the agent is off, and nothing else changes.** Leave both keys unset (or
 empty) in an environment and that deploy serves the full desk (sign-in, the inbox, review, the
 audit log) with the agent switched off: the Proposal pane says so in place of "Run the agent", and
 the run action refuses before it writes anything, so no failed Agent runs pile up and nothing is
