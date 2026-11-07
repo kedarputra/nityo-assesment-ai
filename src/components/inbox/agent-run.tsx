@@ -3,7 +3,6 @@
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import type { InboxStatus } from "@/server/inbox/inbox";
 import { runAgentAction } from "@/server/inbox/actions";
-import { useInboxRun } from "@/components/inbox-run";
 import { StatusPill } from "./status-pill";
 
 // Which emails this browser has asked the agent to read, so the row shows "Reading…" from the
@@ -62,15 +61,13 @@ function withoutKey(map: ReadonlyMap<string, string>, key: string): ReadonlyMap<
 // `reading` in place of what an earlier run left, so an old failure never sits beside "Reading…".
 export function UnlessReading({ emailId, reading, children }: { emailId: string; reading: ReactNode; children: ReactNode }) {
   const runs = useContext(AgentRunsContext);
-  const inboxRun = useInboxRun();
-  const busy = runs?.reading.has(emailId) || inboxRun?.reading?.emailId === emailId;
+  const busy = runs?.reading.has(emailId) ?? false;
   return busy ? reading : children;
 }
 
 export function RowStatus({ emailId, status }: { emailId: string; status: InboxStatus }) {
   const runs = useContext(AgentRunsContext);
-  const inboxRun = useInboxRun();
-  const reading = runs?.reading.has(emailId) || inboxRun?.reading?.emailId === emailId;
+  const reading = runs?.reading.has(emailId) ?? false;
   return <StatusPill status={reading ? "reading" : status} />;
 }
 

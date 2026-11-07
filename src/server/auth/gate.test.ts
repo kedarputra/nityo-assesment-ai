@@ -82,6 +82,20 @@ describe("gateRequest", () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
+  it("lets the app's own Run all step through without a session, its secret being the check (ADR 0004)", async () => {
+    const lookup = vi.fn(findSessionUser);
+    const sameOrigin = request("/api/inbox-run/step", { method: "POST", origin: "https://desk.example" });
+
+    expect(passesThrough(await gateRequest(sameOrigin, lookup))).toBe(true);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a cross-site post to the Run all step", async () => {
+    const crossSite = request("/api/inbox-run/step", { method: "POST", origin: "https://evil.example" });
+
+    expect((await gateRequest(crossSite, findSessionUser)).status).toBe(403);
+  });
+
   it("does not open paths that merely start like a public one", async () => {
     const response = await gateRequest(request("/api/health/details"), findSessionUser);
 

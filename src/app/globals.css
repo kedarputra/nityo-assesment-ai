@@ -248,12 +248,23 @@ header .right {
   max-width: min(340px, calc(100vw - 2 * var(--s4)));
   display: grid;
   gap: var(--s1);
-  justify-items: start;
+  /* Every item is as wide as the menu, so a hover or focus fills the row. */
+  justify-items: stretch;
   padding: var(--s2);
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
   box-shadow: var(--pop);
+}
+
+.account-menu form {
+  display: grid;
+}
+
+.account-menu .btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .account-confirm {

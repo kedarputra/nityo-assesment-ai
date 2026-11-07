@@ -1,6 +1,7 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
+import { isCutOff } from "@/agent/run-errors";
 import { agentRuns, emails, proposals, users, type AgentRunOutcome, type ProposalStatus } from "@/db/schema";
 
 // Where an email stands on the desk, from its latest Agent run and a person's decisions on the
@@ -63,6 +64,7 @@ export async function findInboxEmail(db: Database, emailId: string): Promise<Inb
 
 interface LatestRun {
   runId: string;
+  startedAt: Date;
   endedAt: Date | null;
   outcome: AgentRunOutcome | null;
   proposalStatuses: ProposalStatus[];
@@ -72,7 +74,13 @@ interface LatestRun {
 // the Proposals it made.
 async function latestRuns(db: Database, emailId?: string): Promise<Map<string, LatestRun>> {
   const rows = await db
-    .select({ runId: agentRuns.runId, emailId: agentRuns.emailId, endedAt: agentRuns.endedAt, outcome: agentRuns.outcome })
+    .select({
+      runId: agentRuns.runId,
+      emailId: agentRuns.emailId,
+      startedAt: agentRuns.startedAt,
+      endedAt: agentRuns.endedAt,
+      outcome: agentRuns.outcome,
+    })
     .from(agentRuns)
     .where(emailId === undefined ? undefined : eq(agentRuns.emailId, emailId))
     .orderBy(desc(agentRuns.startedAt));
@@ -91,6 +99,8 @@ async function latestRuns(db: Database, emailId?: string): Promise<Map<string, L
 
 function statusOf(run: LatestRun | undefined): InboxStatus {
   if (!run) return "not_run";
+  // A run cut off with its function never finishes; it shows as not finished, ready to run again.
+  if (isCutOff(run, new Date())) return "failed";
   if (run.endedAt === null || run.outcome === null) return "reading";
   switch (run.outcome) {
     case "released":

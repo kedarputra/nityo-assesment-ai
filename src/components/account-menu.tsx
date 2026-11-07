@@ -51,7 +51,7 @@ function AdminControls({ runGoing, agentOn }: { runGoing: boolean; agentOn: bool
   const [confirming, setConfirming] = useState(false);
   if (!run) return null;
   // This browser's Run all, or one the server says is going (another tab's, or a closed one's).
-  const going = run.reading !== null || runGoing;
+  const going = run.starting || runGoing;
 
   if (confirming) {
     return (

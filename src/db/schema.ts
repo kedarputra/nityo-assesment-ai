@@ -263,10 +263,14 @@ export const inboxRuns = pgTable(
       .notNull()
       .references(() => users.id),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
-    // When the browser last asked for an email; a closed tab stops asking.
+    // When the last email of the run was asked for; a chain that broke stops asking.
     lastStepAt: timestamp("last_step_at", { withTimezone: true }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     endReason: text("end_reason", { enum: inboxRunEndReasons }),
+    // Run all goes on in the background: each email's function asks the app for the next one with
+    // this run's secret, kept only as a SHA-256 hash, at the address the admin used.
+    stepTokenHash: text("step_token_hash"),
+    origin: text("origin"),
   },
   (table) => [
     check("inbox_runs_end_reason_check", sql`${table.endReason} in ('finished', 'stopped', 'spend-limit', 'abandoned')`),

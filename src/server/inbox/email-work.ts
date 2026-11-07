@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { CUT_OFF_ERROR_CLASS, isCutOff } from "@/agent/run-errors";
 import type { Database } from "@/db/database";
 import {
   agentFlags,
@@ -250,7 +251,10 @@ export async function findEmailWork(db: Database, emailId: string): Promise<Emai
     .orderBy(asc(emailLinks.id));
 
   return {
-    run: {
+    run: isCutOff(run, new Date())
+      ? // Cut off with its function: shown as a run that didn't finish, so it can run again.
+        { runId: run.runId, finished: true, outcome: "failed", errorClass: CUT_OFF_ERROR_CLASS, requestKinds: run.requestKinds }
+      : {
       runId: run.runId,
       finished: run.endedAt !== null,
       outcome: run.outcome,

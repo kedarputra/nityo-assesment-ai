@@ -1,79 +1,32 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useRef, useState, type ReactNode } from "react";
-import {
-  finishInboxRunAction,
-  resetToSnapshotAction,
-  runInboxEmailAction,
-  startInboxRunAction,
-  stopInboxRunAction,
-  type InboxRunStepResult,
-} from "@/server/inbox/actions";
-import type { InboxRunPlan } from "@/server/inbox/inbox-run";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { resetToSnapshotAction, startInboxRunAction, stopInboxRunAction } from "@/server/inbox/actions";
 
-// Run all, driven by this browser (ADR 0003): one request per email, in received_at order, each
-// waiting for the last. The header's account menu starts, stops and resets; the greeting card
-// shows the progress. A closed tab simply stops asking, and Run all carries on from there.
+// Run all goes on on the server (ADR 0004): this browser only starts it, stops it and resets,
+// says how that went, and refreshes the desk while anything is being read. Closing the tab, or
+// moving to another page, never stops a run.
 
-export interface InboxRunEnd {
-  // Null when every email of the plan was asked for; otherwise why the run stopped early.
-  stoppedBecause: string | null;
-  // Emails that ran out of time or calls, left for the next Run all.
-  timedOut: number;
-}
-
-export interface InboxRunDriver {
-  runEmail: (emailId: string) => Promise<InboxRunStepResult>;
-  // Before each email: which one is being read now.
-  onReading: (email: { emailId: string; position: number }) => void;
-  // After each email, so the desk shows its outcome straight away.
-  onRead: () => void;
-  // Whether the person pressed Stop.
-  stopRequested: () => boolean;
-}
-
-export const STOPPED_BY_YOU = "Stopped. Press Run all to carry on from where it got to.";
-
-export async function driveInboxRun(plan: InboxRunPlan, driver: InboxRunDriver): Promise<InboxRunEnd> {
-  let timedOut = 0;
-  for (const email of plan.emails) {
-    if (driver.stopRequested()) return { stoppedBecause: STOPPED_BY_YOU, timedOut };
-    driver.onReading(email);
-    const result = await driver.runEmail(email.emailId);
-    driver.onRead();
-    if (!result.ok) return { stoppedBecause: result.message, timedOut };
-    if (result.outcome === "timed-out") timedOut += 1;
-  }
-  return { stoppedBecause: null, timedOut };
-}
-
-export function endMessage(end: InboxRunEnd): InboxRunMessage {
-  if (end.stoppedBecause !== null) return { text: end.stoppedBecause, problem: end.stoppedBecause !== STOPPED_BY_YOU };
-  if (end.timedOut === 0) return { text: "Run all finished: the agent has read every email.", problem: false };
-  const emails = end.timedOut === 1 ? "1 email" : `${end.timedOut} emails`;
-  return { text: `Run all finished. ${emails} timed out; run it again to finish them.`, problem: false };
-}
-
-const NO_ANSWER: InboxRunMessage = { text: "The run stopped: the server didn’t answer. Press Run all to carry on.", problem: true };
-const RESET_FAILED: InboxRunMessage = {
-  text: "The reset didn’t go through. Nothing was changed; try again in a moment.",
-  problem: true,
-};
-
-// How the last Run all or Reset ended. A problem is shown as one (DESIGN.md, "States": a calm
+// How the last Start, Stop or Reset went. A problem is shown as one (DESIGN.md, "States": a calm
 // sentence in a bad-soft card); anything else is plain news.
 export interface InboxRunMessage {
   text: string;
   problem: boolean;
 }
 
+export const STOPPED_BY_YOU = "Stopped. The email being read finishes; press Run all to carry on from there.";
+const NO_ANSWER: InboxRunMessage = { text: "The server didn’t answer. Try again in a moment.", problem: true };
+const RESET_FAILED: InboxRunMessage = {
+  text: "The reset didn’t go through. Nothing was changed; try again in a moment.",
+  problem: true,
+};
+
 export interface InboxRunState {
-  // The email being read now, with its place in the day: "Reading 12 of 40…".
-  reading: { emailId: string; position: number; total: number } | null;
+  starting: boolean;
   stopping: boolean;
-  message: InboxRunMessage | null;
   resetting: boolean;
+  message: InboxRunMessage | null;
   runAll: () => void;
   stop: () => void;
   reset: () => Promise<void>;
@@ -87,52 +40,33 @@ export function useInboxRun(): InboxRunState | null {
 
 export function InboxRunProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [reading, setReading] = useState<InboxRunState["reading"]>(null);
+  const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState<InboxRunMessage | null>(null);
-  const stopRequested = useRef(false);
-  const running = useRef(false);
 
   async function runAll() {
-    if (running.current) return;
-    running.current = true;
-    stopRequested.current = false;
+    if (starting) return;
+    setStarting(true);
     setMessage(null);
     try {
       const started = await startInboxRunAction();
-      if (!started.ok) {
-        setMessage({ text: started.message, problem: true });
-        return;
-      }
-      const { plan } = started;
-      const end = await driveInboxRun(plan, {
-        runEmail: (emailId) => runInboxEmailAction({ inboxRunId: plan.inboxRunId, emailId }),
-        onReading: (email) => setReading({ ...email, total: plan.total }),
-        onRead: () => router.refresh(),
-        stopRequested: () => stopRequested.current,
-      });
-      if (end.stoppedBecause === null) await finishInboxRunAction(plan.inboxRunId);
-      setMessage(endMessage(end));
+      if (!started.ok) setMessage({ text: started.message, problem: true });
     } catch {
       setMessage(NO_ANSWER);
     } finally {
-      running.current = false;
-      setReading(null);
-      setStopping(false);
+      setStarting(false);
       router.refresh();
     }
   }
 
-  // The email being read finishes; no other starts. Stopping on the server also ends a Run all
-  // whose tab was closed.
   function stop() {
-    stopRequested.current = true;
     setStopping(true);
     void stopInboxRunAction()
+      .then(() => setMessage({ text: STOPPED_BY_YOU, problem: false }))
       .catch(() => setMessage(NO_ANSWER))
       .finally(() => {
-        if (!running.current) setStopping(false);
+        setStopping(false);
         router.refresh();
       });
   }
@@ -156,10 +90,10 @@ export function InboxRunProvider({ children }: { children: ReactNode }) {
   }
 
   const state: InboxRunState = {
-    reading,
+    starting,
     stopping,
-    message,
     resetting,
+    message,
     runAll: () => void runAll(),
     stop,
     reset,
@@ -167,31 +101,47 @@ export function InboxRunProvider({ children }: { children: ReactNode }) {
   return <InboxRunContext.Provider value={state}>{children}</InboxRunContext.Provider>;
 }
 
-// In the greeting card: where Run all has got to, and how it ended.
-export function InboxRunProgress() {
+// In the greeting card: that Run all is going on the server, with Stop for an admin, or how the
+// last Start, Stop or Reset went.
+export function InboxRunProgress({ going, canStop }: { going: boolean; canStop: boolean }) {
   const run = useInboxRun();
-  if (!run) return null;
-  if (run.reading) {
+  if (going) {
     return (
       <div className="inbox-run" role="status" aria-live="polite">
         <span className="spinner" aria-hidden="true" />
-        <span>
-          Reading {run.reading.position} of {run.reading.total}…
-        </span>
-        <button type="button" className="btn btn--ghost" onClick={run.stop} disabled={run.stopping} aria-busy={run.stopping}>
-          {run.stopping ? "Stopping…" : "Stop"}
-        </button>
+        <span>Run all is going: the agent reads one email after another, even with this tab closed.</span>
+        {canStop && run ? (
+          <button type="button" className="btn btn--ghost" onClick={run.stop} disabled={run.stopping} aria-busy={run.stopping}>
+            {run.stopping ? "Stopping…" : "Stop"}
+          </button>
+        ) : null}
       </div>
     );
   }
   return (
     <p
-      className={run.message?.problem ? "inbox-run card card--bad" : "inbox-run meta"}
+      className={run?.message?.problem ? "inbox-run card card--bad" : "inbox-run meta"}
       role="status"
       aria-live="polite"
-      hidden={run.message === null}
+      hidden={!run?.message}
     >
-      {run.message?.text}
+      {run?.message?.text}
     </p>
   );
+}
+
+// While the agent is reading anything, the desk asks the server again every few seconds, so a
+// finished email shows up without a reload. It pauses while the tab is hidden.
+const REFRESH_EVERY_MS = 4_000;
+
+export function RefreshWhileReading({ active }: { active: boolean }) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, REFRESH_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [active, router]);
+  return null;
 }

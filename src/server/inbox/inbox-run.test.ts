@@ -15,9 +15,14 @@ import {
   RUN_ALL_ALREADY_GOING,
   STEP_GRACE_MS,
   finishInboxRun,
+  isInboxRunToken,
+  nextEmailOf,
+  runChainStep,
   runInboxRunStep,
+  startBackgroundInboxRun,
   startInboxRun,
   stopInboxRun,
+  type InboxRunChain,
 } from "./inbox-run";
 import { findInboxEmail, listInboxEmails } from "./inbox";
 import { RUN_IN_PROGRESS, ResetRefused, resetInbox } from "./reset";
@@ -166,19 +171,126 @@ describe("an Inbox run", () => {
     await expect(step(plan.inboxRunId, "E002", closesAsSpam())).rejects.toBeInstanceOf(InboxRunRefused);
   });
 
-  it(`allows ${RATE_LIMITS["agent-run"]} agent runs per person per hour, counted in Postgres`, async () => {
+  it("doesn't count Run all's emails against the person's agent-run limit, which 40 emails would pass", async () => {
     const plan = await startInboxRun(db, { userId: adminId, at: start });
     const hourAgo = new Date(start.getTime() - 60 * 60 * 1000 + 60_000);
     await db.insert(rateLimitEvents).values(
       Array.from({ length: RATE_LIMITS["agent-run"] }, () => ({ userId: adminId, action: "agent-run" as const, at: hourAgo })),
     );
 
-    await expect(step(plan.inboxRunId, "E001", closesAsSpam())).rejects.toBeInstanceOf(RateLimited);
-    expect(await db.$count(agentRuns)).toBe(0);
+    await expect(step(plan.inboxRunId, "E001", closesAsSpam())).resolves.toMatchObject({ outcome: "no_action" });
+    expect(await db.$count(rateLimitEvents)).toBe(RATE_LIMITS["agent-run"]);
+  });
+});
 
-    // An hour after those runs, the person may run the agent again.
-    const hourLater = new Date(hourAgo.getTime() + 60 * 60 * 1000 + 1);
-    await expect(step(plan.inboxRunId, "E001", closesAsSpam(), hourLater)).resolves.toMatchObject({ outcome: "no_action" });
+describe("Run all in the background (ADR 0004)", () => {
+  let testDatabase: TestDatabase;
+  let db: Database;
+  let adminId: number;
+  const start = new Date("2026-11-02T12:00:00Z");
+  const origin = "https://desk.test";
+
+  beforeEach(async () => {
+    testDatabase = await createTestDatabase();
+    db = testDatabase.db;
+    await ingestSnapshot(db);
+    const [admin] = await db.insert(users).values({ username: "admin", passwordHash: "x", role: "admin" }).returning();
+    if (!admin) throw new Error("no admin");
+    adminId = admin.id;
+  });
+
+  afterEach(async () => {
+    await testDatabase.close();
+  });
+
+  function deps(model: Model = closesAsSpam()) {
+    const triggered: { chain: InboxRunChain; origin: string }[] = [];
+    return {
+      triggered,
+      deps: {
+        model,
+        modelId: MODEL_ID,
+        now: () => start,
+        triggerNext: async (chain: InboxRunChain, at: string) => {
+          triggered.push({ chain, origin: at });
+        },
+      },
+    };
+  }
+
+  it("keeps only a hash of the run's secret, and accepts the secret alone", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin });
+
+    const [stored] = await db.select().from(inboxRuns).where(eq(inboxRuns.id, chain.inboxRunId));
+    expect(stored?.stepTokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(stored?.stepTokenHash).not.toBe(chain.token);
+    expect(stored?.origin).toBe(origin);
+    expect(await isInboxRunToken(db, chain)).toBe(true);
+    expect(await isInboxRunToken(db, { ...chain, token: "0".repeat(64) })).toBe(false);
+    expect(await isInboxRunToken(db, { ...chain, inboxRunId: chain.inboxRunId + 1 })).toBe(false);
+  });
+
+  it("reads one email per step, in received order, and asks for the next at the admin's address", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin });
+    const first = deps();
+    const second = deps();
+
+    expect(await runChainStep(db, chain, first.deps)).toBe("read");
+    expect(await runChainStep(db, chain, second.deps)).toBe("read");
+
+    expect(await findInboxEmail(db, "E001")).toMatchObject({ status: "no_action" });
+    expect(await findInboxEmail(db, "E002")).toMatchObject({ status: "no_action" });
+    expect(await findInboxEmail(db, "E003")).toMatchObject({ status: "not_run" });
+    expect(first.triggered).toEqual([{ chain, origin }]);
+  });
+
+  it("stops after Stop: the next step reads nothing and asks for nothing", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin });
+    await stopInboxRun(db, { userId: adminId, at: start });
+    const next = deps();
+
+    expect(await runChainStep(db, chain, next.deps)).toBe("ended");
+    expect(await db.$count(agentRuns)).toBe(0);
+    expect(next.triggered).toEqual([]);
+  });
+
+  it("moves past an email that failed instead of trying it again in a loop", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin });
+    const broken: Model = {
+      async send(): Promise<ModelResponse> {
+        throw new Error("the model broke");
+      },
+    };
+
+    await runChainStep(db, chain, deps(broken).deps);
+    expect(await findInboxEmail(db, "E001")).toMatchObject({ status: "failed" });
+
+    await runChainStep(db, chain, deps().deps);
+    expect(await findInboxEmail(db, "E002")).toMatchObject({ status: "no_action" });
+    expect(await nextEmailOf(db, chain.inboxRunId)).toBe("E003");
+  });
+
+  it("finishes the run when no email is left, and asks for nothing more", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin });
+    const inbox = await listInboxEmails(db);
+    // Every email but the last already has an outcome from this run.
+    await db.insert(agentRuns).values(
+      inbox.slice(0, -1).map((email) => ({
+        runId: `done-${email.emailId}`,
+        emailId: email.emailId,
+        modelId: MODEL_ID,
+        startedAt: start,
+        endedAt: start,
+        outcome: "no_action" as const,
+        inboxRunId: chain.inboxRunId,
+      })),
+    );
+    const last = deps();
+
+    expect(await runChainStep(db, chain, last.deps)).toBe("read");
+    expect(await runChainStep(db, chain, deps().deps)).toBe("finished");
+    const [ended] = await db.select().from(inboxRuns).where(eq(inboxRuns.id, chain.inboxRunId));
+    expect(ended).toMatchObject({ endReason: "finished" });
   });
 });
 

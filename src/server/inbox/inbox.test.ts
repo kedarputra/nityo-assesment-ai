@@ -80,7 +80,10 @@ describe("an email's status after an Agent run", () => {
     const endedAt = new Date("2026-11-02T12:06:00Z");
     await testDatabase.db.insert(agentRuns).values([
       { runId: "run-1", emailId: "E001", modelId: "fake", startedAt, endedAt, outcome: "released" },
-      { runId: "run-2", emailId: "E002", modelId: "fake", startedAt },
+      // Still reading: it started a moment ago.
+      { runId: "run-2", emailId: "E002", modelId: "fake", startedAt: new Date() },
+      // Started long ago and never finished: its function was cut off.
+      { runId: "run-5", emailId: "E006", modelId: "fake", startedAt },
       { runId: "run-3", emailId: "E003", modelId: "fake", startedAt, endedAt, outcome: "proposal" },
       { runId: "run-4", emailId: "E004", modelId: "fake", startedAt, endedAt, outcome: "failed" },
     ]);
@@ -96,7 +99,11 @@ describe("an email's status after an Agent run", () => {
 
     expect(statuses).toEqual({ E001: "released", E002: "reading", E003: "needs_you", E004: "failed", E005: "not_run" });
     expect(await findInboxEmail(testDatabase.db, "E001")).toMatchObject({ status: "released" });
-    expect(countByFilter(emails)).toEqual({ all: 40, "needs-you": 2, done: 1, other: 37 });
+    expect(countByFilter(emails)).toEqual({ all: 40, "needs-you": 3, done: 1, other: 36 });
+  });
+
+  it("shows a run cut off with its function as not finished, never reading for ever", async () => {
+    expect(await findInboxEmail(testDatabase.db, "E006")).toMatchObject({ status: "failed" });
   });
 });
 
