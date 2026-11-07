@@ -119,6 +119,7 @@ const flagCodeOfCheck: Record<string, string> = {
   "full-stock": "P2-short-stock",
   "system-price": "P4-price-differs",
   "known-contact": "P5-unverified-contact",
+  "single-ship-to": "P7-multi-ship-to",
 };
 
 export function scoreRun(expected: ExpectedOutcomes, run: EmailRunResult[]): RunScore {

@@ -1,9 +1,8 @@
-import { and, asc, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@/db/database";
 import {
   agentFlags,
-  customerContacts,
   customerPrices,
   customers,
   incomingSupply,
@@ -23,8 +22,10 @@ import { creditCheck, priceFor, stockFor } from "@/rules/business-rules";
 import { usualOrder } from "@/rules/order-history";
 import { proposeCancellation, proposeOrderChange, type ChangeResult } from "./change-gate";
 import { searchCatalog } from "./product-search";
+import { findRelatedWork, linkRelatedEmail, noteForReviewer } from "./related";
 import { proposeNewOrder, releasedTodayFor } from "./release-gate";
 import { closeNoAction, routeToPerson, writeDraftReply } from "./requests";
+import { allContacts, matchSender } from "./sender";
 import { ToolError } from "./tool-error";
 
 // The agent's tools (security 5): the only way the model touches anything. Read tools read the
@@ -82,24 +83,35 @@ const quantity = z.number().int().positive().max(100_000).describe("Whole sellin
 const findCustomer = tool({
   name: "find_customer",
   description:
-    "Find the customer whose known contact has exactly this email address. Returns the customer and the contact, or found: false.",
+    "Find the customer who sent this address: a known contact with exactly this address, or else the one customer whose contacts use its domain (matchedBy: \"domain\", an unverified sender a person must confirm). A domain several customers share identifies no one. Returns the customer and how it matched, or found: false.",
   input: z.strictObject({ email: z.string().min(3).max(254).describe("The exact sender address.") }),
   async run(tx, _context, { email }) {
-    const [row] = await tx
+    const match = matchSender(await allContacts(tx), email);
+    if (match.matchedBy === "none") {
+      return match.sharedDomain
+        ? { found: false, note: "Several customers' contacts use this domain, so it identifies no one." }
+        : { found: false };
+    }
+    const [customer] = await tx
       .select({
         customerId: customers.customerId,
         name: customers.name,
         status: customers.status,
         paymentTerms: customers.paymentTerms,
-        contactName: customerContacts.name,
-        contactRole: customerContacts.role,
       })
-      .from(customerContacts)
-      .innerJoin(customers, eq(customers.customerId, customerContacts.customerId))
-      .where(sql`lower(${customerContacts.email}) = ${email.trim().toLowerCase()}`);
-    if (!row) return { found: false };
-    const { contactName, contactRole, ...customer } = row;
-    return { found: true, customer, contact: { name: contactName, role: contactRole } };
+      .from(customers)
+      .where(eq(customers.customerId, match.customerId));
+    if (!customer) throw new Error(`Contact of a missing customer ${match.customerId}.`);
+    if (match.matchedBy === "address") {
+      return { found: true, matchedBy: "address", customer, contact: { name: match.contact.name, role: match.contact.role } };
+    }
+    return {
+      found: true,
+      matchedBy: "domain",
+      customer,
+      flag: "P5-unverified-contact",
+      note: `The sender is not a known contact; only ${customer.name}'s contacts use ${match.domain}. Any order waits for a person to verify the sender.`,
+    };
   },
 });
 
@@ -235,6 +247,51 @@ const getOrders = tool({
     return {
       orders: orders.map((order) => ({ ...order, lines: lines.filter((line) => line.soNumber === order.soNumber) })),
     };
+  },
+});
+
+const findDuplicate = tool({
+  name: "find_duplicate",
+  description:
+    "The customer's other emails that came in earlier today, with what the agent did with each (its Proposals and their lines, or the Requests routed to a person), and the customer's sales orders that still have lines to ship. Use it before proposing a new order, to spot a duplicate, a follow-up, or an email this one belongs with.",
+  input: z.strictObject({ customer_id: customerId }),
+  async run(tx, context, input) {
+    return findRelatedWork(tx, context, input.customer_id);
+  },
+});
+
+const linkRelatedEmailTool = tool({
+  name: "link_related_email",
+  description:
+    "Link this email to an earlier email from the same customer today that it belongs with, so a person sees both. Set possibly_same_order when this email may be the same order as the earlier one (e.g. the content of its missing attachment): that flags this email for review. Give a remark when something in this email bears on the earlier one's Proposal (e.g. \"skip the towels\"); it is shown to that email's reviewer and never changes its Proposal. Link before you propose the order.",
+  input: z.strictObject({
+    email_id: emailId.describe("The earlier email, e.g. E023."),
+    why: z.string().min(1).max(500).describe("How the two belong together, in a sentence."),
+    possibly_same_order: z.boolean(),
+    remark: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("What the earlier email's reviewer should know from this one."),
+  }),
+  async run(tx, context, input) {
+    return linkRelatedEmail(tx, context, {
+      relatedEmailId: input.email_id,
+      why: input.why,
+      possiblySameOrder: input.possibly_same_order,
+      remark: input.remark ?? null,
+    });
+  },
+});
+
+const noteForReviewerTool = tool({
+  name: "note_for_reviewer",
+  description:
+    "Note context a person should see on this email that is not a reason to hold the order: a mention of another order the email does not act on, or an overlap with an open order's unshipped lines. A note never stops a release; use raise_flag for that.",
+  input: z.strictObject({ note: z.string().min(1).max(500) }),
+  async run(tx, context, input) {
+    return noteForReviewer(tx, context, input.note);
   },
 });
 
@@ -579,8 +636,11 @@ export const agentTools: readonly AgentTool[] = [
   checkStock,
   checkCredit,
   getOrders,
+  findDuplicate,
   getUsualOrder,
   getPendingProposals,
+  linkRelatedEmailTool,
+  noteForReviewerTool,
   proposeNewOrderTool,
   proposeOrderChangeTool,
   proposeCancellationTool,

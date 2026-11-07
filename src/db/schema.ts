@@ -454,6 +454,33 @@ export const emailNotes = pgTable(
   (table) => [index("email_notes_email_id_idx").on(table.emailId)],
 );
 
+// Two emails that belong together (ticket 08 of the map): the run on the later email links it to an
+// earlier one from the same customer today, and the desk shows the link on both. A link never
+// changes the earlier email's Proposal; one that may be the same order flags the later email.
+export const emailLinks = pgTable(
+  "email_links",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    // The email whose run made the link, and the earlier email it links to.
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    relatedEmailId: text("related_email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    why: text("why").notNull(),
+    possiblySameOrder: boolean("possibly_same_order").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("email_links_email_id_idx").on(table.emailId),
+    index("email_links_related_email_id_idx").on(table.relatedEmailId),
+  ],
+);
+
 // A reply the agent wrote for a person to edit and approve. It is never sent. Once a person marks
 // it ready, it is locked.
 export const draftReplies = pgTable("draft_replies", {

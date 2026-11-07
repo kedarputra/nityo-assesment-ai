@@ -27,6 +27,7 @@ import { shortStock, type ShortStock, type ShortStockChoice } from "@/rules/shor
 import { recordAudit } from "./audit";
 import { sellingUnitFits, skuCodesIn } from "./product-search";
 import { releaseChecks, type ReleaseCheck } from "./release-checks";
+import { normaliseAddress } from "./sender";
 import { ToolError } from "./tool-error";
 
 // The release gate (ADR 0001): code, not the model, decides whether a proposed new order is a
@@ -241,10 +242,14 @@ export async function checkOrder(tx: Database, order: OrderToCheck): Promise<Che
     .select({ email: customerContacts.email })
     .from(customerContacts)
     .where(eq(customerContacts.customerId, customer.customerId));
-  const [shipTo] = await tx
-    .select({ shipToId: shipToAddresses.shipToId })
+  const shipTos = await tx
+    .select({ shipToId: shipToAddresses.shipToId, name: shipToAddresses.name })
     .from(shipToAddresses)
-    .where(and(eq(shipToAddresses.shipToId, order.shipToId), eq(shipToAddresses.customerId, customer.customerId)));
+    .where(eq(shipToAddresses.customerId, customer.customerId));
+  const runProposals = await tx
+    .select({ shipToId: proposals.shipToId })
+    .from(proposals)
+    .where(eq(proposals.runId, order.runId));
   const flags = await tx.select({ code: agentFlags.code }).from(agentFlags).where(eq(agentFlags.runId, order.runId));
   const releasedTodayCents = await releasedTodayFor(tx, customer.customerId);
   const searches = await citedSearches(tx, lines);
@@ -263,7 +268,12 @@ export async function checkOrder(tx: Database, order: OrderToCheck): Promise<Che
     lines,
     requested,
     credit,
-    shipToIsTheCustomers: shipTo !== undefined,
+    shipToIsTheCustomers: shipTos.some((shipTo) => shipTo.shipToId === order.shipToId),
+    shipTosOfTheEmail: shipTosOfTheEmail({
+      shipToId: order.shipToId,
+      named: shipTosNamedIn(email?.body ?? "", shipTos),
+      proposed: runProposals.map((proposal) => proposal.shipToId),
+    }),
     flagCodes: flags.map((flag) => flag.code),
     runId: order.runId,
     codesInEmail,
@@ -450,6 +460,9 @@ interface GateFacts {
   requested: ReadDate;
   credit: ReturnType<typeof creditCheck>;
   shipToIsTheCustomers: boolean;
+  // Every ship-to this email asks for: the order's own, those its body names, and those of the
+  // run's other orders.
+  shipTosOfTheEmail: string[];
   flagCodes: string[];
   runId: string;
   codesInEmail: string[];
@@ -471,7 +484,11 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
   const results: Record<ReleaseCheck, Omit<RecordedCheck, "check">> = {
     "known-contact": facts.knownContact
       ? { passes: true, detail: "The sender is a known contact of this customer." }
-      : { passes: false, detail: "The sender is not a known contact of this customer." },
+      : {
+          passes: false,
+          detail: "P5-unverified-contact: the sender is not a known contact of this customer; verify them with a known contact.",
+          flags: ["P5-unverified-contact"],
+        },
     "skus-sellable":
       notSellable.length === 0
         ? { passes: true, detail: "Every SKU is in the catalog and active." }
@@ -521,12 +538,45 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
     "ship-to": facts.shipToIsTheCustomers
       ? { passes: true, detail: "The ship-to is one of this customer's addresses." }
       : { passes: false, detail: "The ship-to is not one of this customer's addresses." },
+    "single-ship-to":
+      facts.shipTosOfTheEmail.length === 1
+        ? { passes: true, detail: "The email asks for one delivery address." }
+        : {
+            passes: false,
+            detail: `P7-multi-ship-to: the email asks for ${facts.shipTosOfTheEmail.length} ship-tos (${facts.shipTosOfTheEmail.join(", ")}), one order each; confirm the split.`,
+            flags: ["P7-multi-ship-to"],
+          },
     "no-flags":
       facts.flagCodes.length === 0
         ? { passes: true, detail: "The agent raised no flags." }
         : { passes: false, detail: `The agent raised: ${facts.flagCodes.join(", ")}.` },
   };
   return releaseChecks.map((check) => ({ check, ...results[check] }));
+}
+
+// Policy 7: one email naming several ship-tos is split into one order per ship-to, and each one
+// waits for a person (U8). The code reads the ship-tos the body names as well as the orders the run
+// proposed, so the first order of a split cannot be released before the model proposes the next.
+function shipTosOfTheEmail(found: { shipToId: string; named: string[]; proposed: string[] }): string[] {
+  return [...new Set([found.shipToId, ...found.named, ...found.proposed])].sort();
+}
+
+// A customer's ship-to is named by what tells it apart: "Metro Fitness - Northgate" by
+// "Northgate"; a name with no such part only by the whole name.
+export function shipTosNamedIn(body: string, shipTos: readonly { shipToId: string; name: string }[]): string[] {
+  if (shipTos.length < 2) return [];
+  const text = body.toLowerCase();
+  return shipTos
+    .filter((shipTo) => {
+      const separator = shipTo.name.lastIndexOf(" - ");
+      const distinct = separator === -1 ? shipTo.name : shipTo.name.slice(separator + 3);
+      return new RegExp(`\\b${escapeRegExp(distinct.toLowerCase())}\\b`).test(text);
+    })
+    .map((shipTo) => shipTo.shipToId);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Policy 3: a DISCONTINUED product is never swapped on the agent's own authority. A line that
@@ -754,8 +804,4 @@ async function nextSoNumber(tx: Database): Promise<string> {
     return match ? Math.max(max, Number(match[1])) : max;
   }, 0);
   return `SO-${highest + 1}`;
-}
-
-export function normaliseAddress(address: string): string {
-  return address.trim().toLowerCase();
 }
