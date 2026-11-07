@@ -117,7 +117,8 @@ export function ProposalReview({ proposal, takesKeys }: { proposal: ProposalView
             extra={(check) =>
               isHardRule(check.check) ? (
                 <span className="lock">{lockedBecause(check.check)}</span>
-              ) : (
+              ) : hardBlocked ? null : (
+                // While a locked rule fails no note can release it, so none is asked for.
                 <input
                   ref={(field) => {
                     if (field) noteFields.current.set(check.check, field);
