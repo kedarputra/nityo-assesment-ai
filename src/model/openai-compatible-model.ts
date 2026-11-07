@@ -19,11 +19,18 @@ const MAX_TOKENS = 16_000;
 const MAX_RETRIES = 3;
 const DEFAULT_RETRY_SECONDS = 10;
 const MAX_RETRY_SECONDS = 30;
+// One call never takes the whole function: a call that hangs fails with a clear error well inside
+// Vercel's 300 s, and the run records it, instead of the platform cutting the function off.
+const DEFAULT_TIMEOUT_MS = 90_000;
 
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
   apiKey: string;
   modelId: string;
+  // How hard the model thinks before it answers. Gemini 3 thinks at length by default, which in
+  // production made one tool call take three to five minutes; "low" keeps a call to seconds.
+  reasoningEffort?: string;
+  timeoutMs?: number;
   fetch?: typeof fetch;
   sleep?: (milliseconds: number) => Promise<void>;
 }
@@ -51,7 +58,8 @@ export class OpenAiCompatibleModel implements Model {
   private readonly sleep: (milliseconds: number) => Promise<void>;
 
   constructor(private readonly options: OpenAiCompatibleOptions) {
-    this.fetch = options.fetch ?? globalThis.fetch;
+    // Called through a wrapper, so the platform's fetch never runs with this model as its `this`.
+    this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   }
 
@@ -62,6 +70,7 @@ export class OpenAiCompatibleModel implements Model {
       messages: toApiMessages(request),
       tools: request.tools.map(toApiTool),
       tool_choice: "auto",
+      ...(this.options.reasoningEffort ? { reasoning_effort: this.options.reasoningEffort } : {}),
     });
     const reply = await this.post(body);
     return fromApiResponse(reply);
@@ -70,11 +79,21 @@ export class OpenAiCompatibleModel implements Model {
   private async post(body: string): Promise<ApiResponse> {
     const url = new URL("chat/completions", withTrailingSlash(this.options.baseUrl));
     for (let attempt = 0; ; attempt += 1) {
-      const response = await this.fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${this.options.apiKey}` },
-        body,
-      });
+      const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      let response: Response;
+      try {
+        response = await this.fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${this.options.apiKey}` },
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
+          throw new Error(`The model didn’t answer within ${Math.round(timeoutMs / 1000)} s.`);
+        }
+        throw error;
+      }
       if (response.ok) return (await response.json()) as ApiResponse;
 
       const text = await response.text();
