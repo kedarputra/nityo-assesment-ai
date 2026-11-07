@@ -4,8 +4,9 @@ import type { SessionUser } from "./sessions";
 export const SESSION_COOKIE = "hp_session";
 export const SIGN_IN_PATH = "/sign-in";
 
-// The only paths open without a session (security 7).
-const PUBLIC_PATHS = new Set([SIGN_IN_PATH, "/api/health"]);
+// The only paths open without a session (security 7). The Run all step carries its run's own
+// secret instead, checked by the route (ADR 0004).
+const PUBLIC_PATHS = new Set([SIGN_IN_PATH, "/api/health", "/api/inbox-run/step"]);
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export type FindSessionUser = (token: string) => Promise<SessionUser | null>;

@@ -19,7 +19,8 @@ export function configuredModel(env: Record<string, string | undefined> = proces
 export function modelFor(choice: ModelChoice, env: Record<string, string | undefined> = process.env): Model {
   if (choice.provider === "anthropic") return new AnthropicModel({ modelId: choice.modelId });
   return new OpenAiCompatibleModel({
-    baseUrl: GEMINI_BASE_URL,
+    // Overridable for a local stand-in of the endpoint; production leaves it unset.
+    baseUrl: env.GEMINI_BASE_URL?.trim() || GEMINI_BASE_URL,
     apiKey: env.GEMINI_API_KEY?.trim() ?? "",
     modelId: choice.modelId,
     reasoningEffort: env.GEMINI_REASONING_EFFORT?.trim() || DEFAULT_GEMINI_REASONING_EFFORT,

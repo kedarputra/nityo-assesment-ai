@@ -13,10 +13,8 @@ import { createTestDatabase, type TestDatabase } from "@/test/database";
 import { e001Script } from "@/test/e001-script";
 import {
   dismissTipAction,
-  finishInboxRunAction,
   resetToSnapshotAction,
   runAgentAction,
-  runInboxEmailAction,
   startInboxRunAction,
   stopInboxRunAction,
 } from "./actions";
@@ -33,7 +31,20 @@ vi.mock("next/headers", () => ({
       return value === undefined ? undefined : { name, value };
     },
   }),
+  headers: async () => new Headers({ host: "desk.test", "x-forwarded-proto": "https" }),
 }));
+// The agent reads on after the action answers (`after`, ADR 0004); a test waits for that work.
+const background = vi.hoisted(() => ({ pending: [] as Promise<unknown>[] }));
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: (work: () => unknown) => {
+    background.pending.push(Promise.resolve().then(work));
+  },
+}));
+
+async function settled(): Promise<void> {
+  while (background.pending.length > 0) await Promise.all(background.pending.splice(0));
+}
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // The Reset's owner connection is the same test database here.
 vi.mock("@/db/client", () => ({
@@ -102,7 +113,9 @@ describe("runAgentAction", () => {
   });
 
   afterEach(async () => {
+    await settled();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     cookieJar.clear();
     await testDatabase.close();
   });
@@ -123,6 +136,9 @@ describe("runAgentAction", () => {
     const reviewerId = await signInAs("reviewer");
 
     expect(await runAgentAction("E001")).toEqual({ ok: true });
+    // Answered at once: the run is recorded and the agent is reading in the background.
+    expect(await findInboxEmail(database, "E001")).toMatchObject({ status: "reading" });
+    await settled();
 
     expect(await findInboxEmail(database, "E001")).toMatchObject({ status: "released" });
     const work = await findEmailWork(database, "E001");
@@ -150,6 +166,7 @@ describe("runAgentAction", () => {
   it("refuses an email that has already run, without running it again", async () => {
     await signInAs("reviewer");
     await runAgentAction("E001");
+    await settled();
 
     const again = await runAgentAction("E001");
 
@@ -177,10 +194,14 @@ describe("the admin's controls", () => {
     await ingestSnapshot(database);
     // The fake model never calls out; the key only switches the agent on (agent-switch.ts).
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key-never-sent");
+    // A step asks the app for the next one over HTTP; here nothing leaves the test.
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 202 }));
   });
 
   afterEach(async () => {
+    await settled();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     cookieJar.clear();
     await testDatabase.close();
   });
@@ -190,11 +211,6 @@ describe("the admin's controls", () => {
     await signInAs("admin");
 
     expect(await startInboxRunAction()).toEqual({ ok: false, message: AGENT_OFF_MESSAGE });
-    expect(await runInboxEmailAction({ inboxRunId: 1, emailId: "E001" })).toEqual({
-      ok: false,
-      stop: true,
-      message: AGENT_OFF_MESSAGE,
-    });
     expect(await database.$count(inboxRuns)).toBe(0);
     expect(await database.$count(agentRuns)).toBe(0);
   });
@@ -203,9 +219,7 @@ describe("the admin's controls", () => {
     await signInAs("reviewer");
 
     await expect(startInboxRunAction()).rejects.toThrow(/admin/);
-    await expect(runInboxEmailAction({ inboxRunId: 1, emailId: "E001" })).rejects.toThrow(/admin/);
     await expect(stopInboxRunAction()).rejects.toThrow(/admin/);
-    await expect(finishInboxRunAction(1)).rejects.toThrow(/admin/);
     await expect(resetToSnapshotAction({ confirmed: true })).rejects.toThrow(/admin/);
 
     expect(await database.$count(inboxRuns)).toBe(0);
@@ -213,15 +227,27 @@ describe("the admin's controls", () => {
     expect(await database.$count(auditEvents)).toBe(0);
   });
 
-  it("runs the inbox one email at a time for an admin, and refuses a second Run all", async () => {
+  it("runs the inbox in the background for an admin, one email per step, and refuses a second Run all", async () => {
+    const asked: { url: string; body: unknown; origin: string | null }[] = [];
+    vi.stubGlobal("fetch", async (url: URL, init: RequestInit) => {
+      asked.push({ url: String(url), body: JSON.parse(String(init.body)), origin: new Headers(init.headers).get("origin") });
+      return new Response(null, { status: 202 });
+    });
     await signInAs("admin");
 
-    const started = await startInboxRunAction();
-    if (!started.ok) throw new Error(started.message);
-    expect(started.plan.emails[0]).toEqual({ emailId: "E001", position: 1 });
-    expect(await runInboxEmailAction({ inboxRunId: started.plan.inboxRunId, emailId: "E001" })).toEqual({ ok: true, outcome: "done" });
-
+    expect(await startInboxRunAction()).toEqual({ ok: true });
     expect(await startInboxRunAction()).toEqual({ ok: false, message: "Run all is already going. Let it finish, or stop it first." });
+    await settled();
+
+    // The first step read E001 in the background, then asked the app for the next step.
+    expect(await findInboxEmail(database, "E001")).toMatchObject({ status: "released" });
+    expect(asked).toEqual([
+      {
+        url: "https://desk.test/api/inbox-run/step",
+        body: { inboxRunId: 1, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
+        origin: "https://desk.test",
+      },
+    ]);
   });
 
   it("refuses a reset while a run holds the lock, with the words from the decision", async () => {
@@ -231,6 +257,8 @@ describe("the admin's controls", () => {
     expect(await resetToSnapshotAction({ confirmed: true })).toEqual({ ok: false, message: "A run is in progress. Stop it first." });
 
     await stopInboxRunAction();
+    // The email being read when Stop was pressed finishes first.
+    await settled();
     expect(await resetToSnapshotAction({ confirmed: true })).toEqual({ ok: true });
     const [first] = await database.select().from(auditEvents);
     expect(first).toMatchObject({ action: "snapshot.reset", detail: { by: "ops.admin" } });

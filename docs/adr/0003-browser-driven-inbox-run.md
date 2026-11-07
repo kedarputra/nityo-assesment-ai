@@ -1,5 +1,7 @@
 # The browser drives a whole-inbox run, one email per request
 
+**Superseded by [ADR 0004](0004-server-driven-background-runs.md)**: a closed tab stopped Run all, so the server now drives it.
+
 A run over the whole inbox (40 emails in `received_at` order, each a multi-step Claude tool-use
 loop) cannot fit in one Vercel function invocation: Hobby allows 300 s, and the whole inbox is
 estimated at 15 to 150 minutes. We drive it from the browser instead. "Run all" calls the "run one

@@ -3,6 +3,7 @@ import { getDatabase } from "@/db/client";
 import { isAgentConfigured } from "@/model/agent-switch";
 import { requireUser } from "@/server/auth/current-user";
 import { findEmailWork } from "@/server/inbox/email-work";
+import { isInboxRunActive } from "@/server/inbox/inbox-run";
 import {
   countByFilter,
   findInboxEmail,
@@ -12,8 +13,8 @@ import {
   parseInboxQuery,
 } from "@/server/inbox/inbox";
 
-// "Run the agent" is a server action on this page, and one Agent run usually takes under a
-// minute; 300 s is the function's hard cap (speed and observability targets).
+// "Run the agent" and Run all are server actions on this page; the agent reads on after they
+// answer (`after`, ADR 0004), within the function's 300 s cap.
 export const maxDuration = 300;
 
 export default async function InboxPage({ searchParams }: PageProps<"/">) {
@@ -22,7 +23,11 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const query = parseInboxQuery(await searchParams);
   const db = getDatabase();
 
-  const [emails, tipDismissed] = await Promise.all([listInboxEmails(db), isTipDismissed(db, user.id)]);
+  const [emails, tipDismissed, runAllGoing] = await Promise.all([
+    listInboxEmails(db),
+    isTipDismissed(db, user.id),
+    isInboxRunActive(db),
+  ]);
   const shown = emails.filter((email) => isInFilter(email, query.filter));
   // With no email in the URL, the desk opens the first one the filter shows. An email the URL asks
   // for that is not in today's inbox (E999, or not an id at all) opens nothing, and says so.
@@ -43,6 +48,8 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
       tipDismissed={tipDismissed}
       agentOn={isAgentConfigured()}
       notFound={askedFor !== undefined && selected === null}
+      runAllGoing={runAllGoing}
+      isAdmin={user.role === "admin"}
     />
   );
 }

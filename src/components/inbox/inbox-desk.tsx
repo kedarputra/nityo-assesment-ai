@@ -11,7 +11,7 @@ import {
   inboxFilters,
   isHandled,
 } from "@/server/inbox/inbox";
-import { InboxRunProgress } from "@/components/inbox-run";
+import { InboxRunProgress, RefreshWhileReading } from "@/components/inbox-run";
 import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
 import { ProposalPane } from "./proposal-pane";
@@ -30,10 +30,13 @@ export interface InboxDeskProps {
   // What the agent did with the selected email, or null when it has not run on it.
   work: EmailWork | null;
   tipDismissed: boolean;
-  // False when the deploy has no Anthropic key: the desk works, the agent does not run.
+  // False when the deploy has no model key: the desk works, the agent does not run.
   agentOn: boolean;
   // The URL asked for an email that is not in today's inbox.
   notFound?: boolean;
+  // A Run all is going on the server; an admin's progress line offers Stop.
+  runAllGoing?: boolean;
+  isAdmin?: boolean;
 }
 
 const FILTER_NAMES: Record<InboxFilter, string> = {
@@ -57,9 +60,13 @@ export function InboxDesk({
   tipDismissed,
   agentOn,
   notFound = false,
+  runAllGoing = false,
+  isAdmin = false,
 }: InboxDeskProps) {
+  const anyReading = emails.some((email) => email.status === "reading");
   return (
     <AgentRunsProvider>
+      <RefreshWhileReading active={anyReading || runAllGoing} />
       <ReviewDeskProvider
         filter={query.filter}
         view={query.view}
@@ -68,7 +75,7 @@ export function InboxDesk({
       >
         <div className="desk" data-view={query.view}>
           <section className="desk-pane desk-pane--list" aria-label="Emails">
-            <GreetingCard emails={emails} agentOn={agentOn} />
+            <GreetingCard emails={emails} agentOn={agentOn} runAllGoing={runAllGoing} isAdmin={isAdmin} />
             {tipDismissed ? null : <TipCard agentOn={agentOn} />}
             <FilterBar query={query} counts={counts} />
             <div className="rows-wrap">
@@ -112,7 +119,17 @@ function inboxHref({
   return `${INBOX_PATH}?${params.toString()}`;
 }
 
-function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: boolean }) {
+function GreetingCard({
+  emails,
+  agentOn,
+  runAllGoing,
+  isAdmin,
+}: {
+  emails: InboxEmail[];
+  agentOn: boolean;
+  runAllGoing: boolean;
+  isAdmin: boolean;
+}) {
   const total = emails.length;
   const handled = emails.filter((email) => isHandled(email.status)).length;
   const percent = total === 0 ? 0 : Math.round((handled / total) * 100);
@@ -136,7 +153,7 @@ function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: bool
         {handled} of {total} handled
         <span className="hide-tablet"> · Press <kbd>?</kbd> for keyboard keys</span>
       </p>
-      <InboxRunProgress />
+      <InboxRunProgress going={runAllGoing} canStop={isAdmin} />
     </div>
   );
 }

@@ -18,7 +18,7 @@ import { SpendLimitReached, toolCallsIn, type Model, type ModelMessage, type Mod
 import { BusinessRuleError } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
 import { lockReleases } from "./release-gate";
-import { SPEND_LIMIT_ERROR_CLASS } from "./run-errors";
+import { isCutOff, SPEND_LIMIT_ERROR_CLASS } from "./run-errors";
 import { emailMessage, SYSTEM_PROMPT } from "./prompt";
 import { ToolError } from "./tool-error";
 import { findTool, toolDefinitions, type ToolContext } from "./tools";
@@ -31,10 +31,9 @@ export const MAX_TOOL_RESULT_CHARS = 8_000;
 // The route's function stops at 300 s (`maxDuration`). A run asks the model for nothing once less
 // than this is left before the deadline, since one call can take most of a minute, and ends as
 // timed out rather than being cut off half-way.
-export const DEADLINE_MARGIN_MS = 60_000;
-// A run that has not finished this long after it started was cut off with its function, so it no
-// longer holds its email or blocks a Reset.
-export const RUN_ABANDONED_AFTER_MS = 360_000;
+// One call may take up to the model's own timeout (90 s for Gemini), so the margin is larger.
+export const DEADLINE_MARGIN_MS = 100_000;
+export { RUN_ABANDONED_AFTER_MS } from "./run-errors";
 
 // Dollars per million tokens, in and out; the run record's cost is an estimate from these.
 const PRICES_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {
@@ -96,10 +95,24 @@ export async function takeSnapshotLock(tx: Database): Promise<void> {
 
 // A run still reading: not finished, and not so old that its function was cut off.
 export function isReading(run: { startedAt: Date; endedAt: Date | null }, now: Date): boolean {
-  return run.endedAt === null && now.getTime() - run.startedAt.getTime() < RUN_ABANDONED_AFTER_MS;
+  return run.endedAt === null && !isCutOff(run, now);
 }
 
+// A run that has begun: its record is written and its email is held, but the model has not been
+// asked anything yet. The desk shows the email as being read from this moment.
+export interface BegunAgentRun {
+  context: ToolContext;
+  email: typeof emails.$inferSelect;
+}
+
+// Runs the agent on one email from start to finish.
 export async function runAgent(db: Database, model: Model, options: RunAgentOptions): Promise<AgentRunSummary> {
+  return continueAgentRun(db, model, await beginAgentRun(db, options), options);
+}
+
+// The part of a run that must happen while the person waits: the checks that may refuse it, and
+// its record. What follows can run in the background (`continueAgentRun`).
+export async function beginAgentRun(db: Database, options: RunAgentOptions): Promise<BegunAgentRun> {
   const now = options.now ?? (() => new Date());
   const [email] = await db.select().from(emails).where(eq(emails.emailId, options.emailId));
   if (!email) throw new AgentRunRefused(`There is no email ${options.emailId}.`);
@@ -146,6 +159,19 @@ export async function runAgent(db: Database, model: Model, options: RunAgentOpti
     orderDate: businessDateOf(email.receivedAt),
     now,
   };
+  return { context, email };
+}
+
+// The model's tool-use loop over a begun run, and the run's finish. It never throws for the run's
+// own failures: they are recorded on the run.
+export async function continueAgentRun(
+  db: Database,
+  model: Model,
+  begun: BegunAgentRun,
+  options: Pick<RunAgentOptions, "modelId" | "deadline" | "now">,
+): Promise<AgentRunSummary> {
+  const now = options.now ?? (() => new Date());
+  const { context, email } = begun;
   const usage: Usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0 };
   const tools = toolDefinitions();
   const messages: ModelMessage[] = [{ role: "user", content: [{ type: "text", text: emailMessage(email) }] }];

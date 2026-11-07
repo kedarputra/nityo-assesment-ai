@@ -1,25 +1,20 @@
 "use server";
 
-import { getDeadline } from "@vercel/functions";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { after } from "next/server";
 import { z } from "zod";
-import { AgentRunRefused, runAgent, type AgentRunSummary } from "@/agent/run-agent";
-import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
+import { AgentRunRefused, beginAgentRun, continueAgentRun } from "@/agent/run-agent";
 import { getDatabase, withOwnerDatabase } from "@/db/client";
+import type { Database } from "@/db/database";
+import { errorClassOf, logError } from "@/lib/log";
 import { AGENT_OFF_MESSAGE, isAgentConfigured } from "@/model/agent-switch";
 import { configuredModel } from "@/model/configured-model";
 import { requireRole } from "@/server/auth/current-user";
 import { RateLimited, takeRateLimit } from "@/server/rate-limits";
+import { functionDeadline, stepInBackground } from "./background";
 import { dismissTip } from "./inbox";
-import {
-  finishInboxRun,
-  InboxRunRefused,
-  runInboxRunStep,
-  SPEND_LIMIT_MESSAGE,
-  startInboxRun,
-  stopInboxRun,
-  type InboxRunPlan,
-} from "./inbox-run";
+import { InboxRunRefused, startBackgroundInboxRun, stopInboxRun } from "./inbox-run";
 import { resetInbox, ResetRefused } from "./reset";
 
 // The tip card stays dismissed for this person on every device (DESIGN.md, "Tip card").
@@ -29,20 +24,14 @@ export async function dismissTipAction(): Promise<void> {
   revalidatePath("/");
 }
 
-// The page's `maxDuration`, for when the platform does not say when the function will be stopped.
-const FUNCTION_SECONDS = 300;
-
-function functionDeadline(): Date {
-  return getDeadline() ?? new Date(Date.now() + FUNCTION_SECONDS * 1000);
-}
-
 export type RunAgentResult = { ok: true } | { ok: false; message: string };
 
 const emailIdInput = z.string().regex(/^E\d{3}$/);
 
 // "Run the agent" on one email that has not run, or whose run did not finish (security 2: a
-// reviewer may). A run's own failures are kept on its Agent run record and shown in the Proposal
-// pane; a spend limit is said here as well, since it stops every run.
+// reviewer may). It answers as soon as the run is recorded; the agent reads on in the background
+// (ADR 0004), so the person can move around the desk, or leave it. The run's outcome, and any
+// failure, is on its Agent run record and shows in the Proposal pane.
 export async function runAgentAction(emailId: string): Promise<RunAgentResult> {
   const user = await requireRole("reviewer");
   const parsed = emailIdInput.safeParse(emailId);
@@ -51,16 +40,23 @@ export async function runAgentAction(emailId: string): Promise<RunAgentResult> {
   const configured = configuredModel();
   if (configured === null) return { ok: false, message: AGENT_OFF_MESSAGE };
 
-  const modelId = configured.choice.modelId;
+  const db = getDatabase();
+  const options = {
+    emailId: parsed.data,
+    modelId: configured.choice.modelId,
+    startedBy: user.id,
+    deadline: functionDeadline(),
+    admit: (tx: Database) => takeRateLimit(tx, { userId: user.id, action: "agent-run", at: new Date() }),
+  };
   try {
-    const summary = await runAgent(getDatabase(), configured.model, {
-      emailId: parsed.data,
-      modelId,
-      startedBy: user.id,
-      deadline: functionDeadline(),
-      admit: (tx) => takeRateLimit(tx, { userId: user.id, action: "agent-run", at: new Date() }),
+    const begun = await beginAgentRun(db, options);
+    after(async () => {
+      try {
+        await continueAgentRun(db, configured.model, begun, options);
+      } catch (error) {
+        logError({ event: "background_run_failed", runId: begun.context.runId, emailId: begun.context.emailId, errorClass: errorClassOf(error) });
+      }
     });
-    if (summary.errorClass === SPEND_LIMIT_ERROR_CLASS) return { ok: false, message: SPEND_LIMIT_MESSAGE };
   } catch (error) {
     if (!(error instanceof AgentRunRefused) && !(error instanceof RateLimited)) throw error;
     return { ok: false, message: error.message };
@@ -72,66 +68,33 @@ export async function runAgentAction(emailId: string): Promise<RunAgentResult> {
 
 // ---- The admin's controls (security 2: only an admin may run the whole inbox, stop it or reset) --
 
-export type StartInboxRunResult = { ok: true; plan: InboxRunPlan } | { ok: false; message: string };
+export type StartInboxRunResult = { ok: true } | { ok: false; message: string };
 
+// The address the admin is using, so the background steps ask this same app for the next email.
+async function requestOrigin(): Promise<string> {
+  const incoming = await headers();
+  const host = incoming.get("x-forwarded-host") ?? incoming.get("host");
+  const protocol = incoming.get("x-forwarded-proto") ?? (host?.startsWith("localhost") || host?.startsWith("127.") ? "http" : "https");
+  if (!host) throw new Error("The request has no host.");
+  return `${protocol}://${host}`;
+}
+
+// Run all in the background (ADR 0004): the server reads the inbox one email per function, so the
+// admin can close the tab. The desk shows the progress as it refreshes.
 export async function startInboxRunAction(): Promise<StartInboxRunResult> {
   const user = await requireRole("admin");
   // Run all reads every email, so with the agent switched off it is refused before any write.
   if (!isAgentConfigured()) return { ok: false, message: AGENT_OFF_MESSAGE };
   try {
-    return { ok: true, plan: await startInboxRun(getDatabase(), { userId: user.id, at: new Date() }) };
+    const chain = await startBackgroundInboxRun(getDatabase(), { userId: user.id, at: new Date(), origin: await requestOrigin() });
+    after(() => stepInBackground(chain));
   } catch (error) {
     if (!(error instanceof InboxRunRefused)) throw error;
     return { ok: false, message: error.message };
-  }
-}
-
-// How one email of an Inbox run went. `stop` ends the Run all in the browser with its message; a
-// timed-out or failed email is left for the next Run all, and the run carries on.
-export type InboxRunStepResult =
-  | { ok: true; outcome: "done" | "timed-out" | "failed" | "skipped" }
-  | { ok: false; stop: true; message: string };
-
-const stepInput = z.strictObject({ inboxRunId: z.number().int().positive(), emailId: emailIdInput });
-
-export async function runInboxEmailAction(input: unknown): Promise<InboxRunStepResult> {
-  const user = await requireRole("admin");
-  const parsed = stepInput.safeParse(input);
-  if (!parsed.success) return { ok: false, stop: true, message: "That request didn’t make sense to the server. Reload the page and try again." };
-  const configured = configuredModel();
-  if (configured === null) return { ok: false, stop: true, message: AGENT_OFF_MESSAGE };
-
-  const modelId = configured.choice.modelId;
-  try {
-    const summary = await runInboxRunStep(getDatabase(), configured.model, {
-      ...parsed.data,
-      userId: user.id,
-      modelId,
-      deadline: functionDeadline(),
-    });
-    return stepResult(summary);
-  } catch (error) {
-    if (error instanceof InboxRunRefused || error instanceof RateLimited) return { ok: false, stop: true, message: error.message };
-    // The email is being read, or was read, outside this run: nothing to do here.
-    if (error instanceof AgentRunRefused) return { ok: true, outcome: "skipped" };
-    throw error;
   } finally {
-    revalidatePath("/");
+    revalidatePath("/", "layout");
   }
-}
-
-function stepResult(summary: AgentRunSummary): InboxRunStepResult {
-  if (summary.errorClass === SPEND_LIMIT_ERROR_CLASS) return { ok: false, stop: true, message: SPEND_LIMIT_MESSAGE };
-  if (isTimedOut(summary.errorClass)) return { ok: true, outcome: "timed-out" };
-  if (summary.outcome === "failed") return { ok: true, outcome: "failed" };
-  return { ok: true, outcome: "done" };
-}
-
-export async function finishInboxRunAction(inboxRunId: unknown): Promise<void> {
-  const user = await requireRole("admin");
-  const parsed = z.number().int().positive().safeParse(inboxRunId);
-  if (!parsed.success) return;
-  await finishInboxRun(getDatabase(), { inboxRunId: parsed.data, userId: user.id, at: new Date() });
+  return { ok: true };
 }
 
 export async function stopInboxRunAction(): Promise<void> {
