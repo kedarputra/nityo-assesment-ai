@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatBusinessDay, formatBusinessTime } from "@/lib/business-clock";
 import { dismissTipAction } from "@/server/inbox/actions";
+import { PendingHint } from "../pending-hint";
 import type { EmailWork } from "@/server/inbox/email-work";
 import {
   type InboxEmail,
@@ -176,6 +177,7 @@ function FilterBar({ query, counts }: { query: InboxQuery; counts: Record<InboxF
         >
           {FILTER_NAMES[filter]}
           <span className="filter-count">{counts[filter]}</span>
+          <PendingHint />
         </Link>
       ))}
     </div>
@@ -222,6 +224,7 @@ function EmailRow({ email, href, selected }: { email: InboxEmail; href: string; 
           <RowStatus emailId={email.emailId} status={email.status} />
         </span>
       </span>
+      <PendingHint />
     </Link>
   );
 }

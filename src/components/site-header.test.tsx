@@ -24,7 +24,7 @@ describe("SiteHeader", () => {
   it("links the signed-in person to the inbox and the audit log", () => {
     const html = renderToStaticMarkup(<SiteHeader user={{ id: 1, username: "ops.reviewer", role: "reviewer" }} />);
 
-    expect(html).toContain('<a aria-current="page" href="/">Inbox</a><a href="/audit">Audit log</a>');
+    expect(html).toContain('<a aria-current="page" href="/">Inbox<span aria-hidden="true" class="pending-hint"></span></a><a href="/audit">Audit log<span aria-hidden="true" class="pending-hint"></span></a>');
   });
 
   it("names the signed-in person and offers a sign-out button", () => {

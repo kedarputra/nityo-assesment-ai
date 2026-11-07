@@ -1087,9 +1087,9 @@ ul.rows {
   justify-items: start;
 }
 
-/* Pages with one column, such as the audit log */
+/* Pages with one column, such as the audit log: as wide as the page, like the desk, so the
+   detail column has room. */
 .narrow {
-  max-width: 1100px;
   margin: 0 auto;
   display: grid;
   gap: var(--s2);
@@ -1550,4 +1550,59 @@ kbd {
   display: grid;
   gap: var(--s3);
   justify-items: start;
+}
+
+/* A link whose page is on its way (PendingHint): a thin accent bar along its foot, and a row or a
+   chip tinted at once, so a click is never silent while the server renders. */
+.row,
+.filter,
+nav.tabs a {
+  position: relative;
+}
+
+.pending-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  pointer-events: none;
+}
+
+.pending-hint.is-pending {
+  opacity: 1;
+  animation: pending-bar 1.6s ease-out forwards;
+}
+
+@keyframes pending-bar {
+  from {
+    transform: scaleX(0.05);
+  }
+  to {
+    transform: scaleX(0.9);
+  }
+}
+
+.row:has(.is-pending),
+.filter:has(.is-pending) {
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-hint.is-pending {
+    animation: none;
+    transform: scaleX(1);
+  }
+}
+
+.audit-loading {
+  margin-top: var(--s3);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ink-muted);
 }

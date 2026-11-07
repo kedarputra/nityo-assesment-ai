@@ -12,7 +12,7 @@ describe("HeaderNav", () => {
     const html = renderToStaticMarkup(<HeaderNav />);
 
     expect(html).toBe(
-      '<nav class="tabs" aria-label="Sections"><a href="/">Inbox</a><a aria-current="page" href="/audit">Audit log</a></nav>',
+      '<nav class="tabs" aria-label="Sections"><a href="/">Inbox<span aria-hidden="true" class="pending-hint"></span></a><a aria-current="page" href="/audit">Audit log<span aria-hidden="true" class="pending-hint"></span></a></nav>',
     );
   });
 });
