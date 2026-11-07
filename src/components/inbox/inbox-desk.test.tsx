@@ -256,6 +256,8 @@ const e001Released: EmailWork = {
   flags: [],
   draftReply: { body: "Hi Maria, SO-24059 is confirmed for Thursday.", readyBy: null, readyAt: null },
   notes: [],
+  context: [],
+  related: [],
 };
 
 describe("InboxDesk, the Proposal pane after a run", () => {
@@ -412,12 +414,56 @@ describe("InboxDesk, the Proposal pane after a run", () => {
       flags: [],
       draftReply: null,
       notes: [],
+      context: [],
+      related: [],
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The agent timed out on this email");
+    expect(html).toContain("Run it again");
+    expect(html).toContain("call-cap");
+    expect(html).toContain(">Run the agent</button>");
+  });
+
+  it("says a run that broke did not finish, and offers to run it again", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "no-outcome", requestKinds: [] },
+      proposals: [],
+      routed: [],
+      noAction: null,
+      flags: [],
+      draftReply: null,
+      notes: [],
+      context: [],
+      related: [],
     };
 
     const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
 
     expect(html).toContain("The agent didn’t finish this email");
-    expect(html).toContain("call-cap");
+    expect(html).toContain(">Run the agent</button>");
+  });
+
+  it("shows the calm spend-limit words when the model's limit stopped the run", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "spend-limit", requestKinds: [] },
+      proposals: [],
+      routed: [],
+      noAction: null,
+      flags: [],
+      draftReply: null,
+      notes: [],
+      context: [],
+      related: [],
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The model’s spending limit is reached, so runs are paused");
+    expect(html).toContain("Ask an admin to raise the limit");
   });
 
   it("shows Reading… while a run is under way", () => {
@@ -430,6 +476,8 @@ describe("InboxDesk, the Proposal pane after a run", () => {
       flags: [],
       draftReply: null,
       notes: [],
+      context: [],
+      related: [],
     };
 
     const html = renderDesk({ emails: [listed(reading)], query: { emailId: "E001" }, selected: reading, work });
@@ -458,7 +506,7 @@ describe("InboxDesk, routed and no-action emails", () => {
     body: "Resending in case the first one didn't come through.",
     status: "no_action",
   };
-  const nothingElse = { proposals: [], routed: [], noAction: null, flags: [], draftReply: null, notes: [] };
+  const nothingElse = { proposals: [], routed: [], noAction: null, flags: [], draftReply: null, notes: [], context: [], related: [] };
 
   it("shows a routed Request as Needs you, with its kind, summary and Draft reply, and no lines or gate", () => {
     const work: EmailWork = {
@@ -515,6 +563,27 @@ describe("InboxDesk, routed and no-action emails", () => {
     expect(html).toContain('<h2 class="headline">A question about an earlier order</h2>');
     expect(html).toContain('class="lines"');
     expect(html).toContain('<a href="/?filter=all&amp;email=E028">E028</a> Away until 9 November.');
+  });
+
+  it("shows the emails this one is linked with and what the agent noted for its reviewer", () => {
+    const [proposal] = e001Released.proposals;
+    if (!proposal) throw new Error("no proposal");
+    const work: EmailWork = {
+      ...e001Released,
+      run: { ...e001Released.run, outcome: "proposal" },
+      proposals: [{ ...proposal, status: "open", soNumber: null }],
+      related: [{ emailId: "E023", why: "Possibly PO HV-3405, which E023 said was attached." }],
+      context: ["Mentions a PO being cancelled but names none."],
+    };
+    const waiting: InboxEmailWithBody = { ...maria, status: "needs_you" };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: waiting, work });
+
+    expect(html).toContain(
+      'Related: <a href="/?filter=all&amp;email=E023">E023</a> Possibly PO HV-3405, which E023 said was attached.',
+    );
+    expect(html).toContain("What the agent noted");
+    expect(html).toContain("Mentions a PO being cancelled but names none.");
   });
 });
 

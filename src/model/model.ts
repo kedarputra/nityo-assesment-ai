@@ -19,6 +19,9 @@ export interface ToolCall {
   id: string;
   name: string;
   input: unknown;
+  // What a provider attaches to the call and needs back unchanged on the next turn (Gemini's
+  // thought signature). Opaque to the agent.
+  providerData?: unknown;
 }
 
 export interface ToolResult {
@@ -86,4 +89,15 @@ export function textIn(message: AssistantMessage): string {
     .filter((block): block is TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+// The model's spending limit is reached (Anthropic answers 400 "usage limits" or 429
+// `enforced_spend_limit_reached`). It stops the run and is never retried: every retry would fail
+// the same way until an admin raises the limit.
+export class SpendLimitReached extends Error {
+  override name = "SpendLimitReached";
+
+  constructor() {
+    super("The model's spending limit is reached.");
+  }
 }

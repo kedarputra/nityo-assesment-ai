@@ -1,6 +1,6 @@
-import { modelIdFromEnv } from "@/model/anthropic-model";
+import { modelChoiceFromEnv, type ModelChoice } from "@/model/agent-switch";
 
-// `make eval` calls the paid model and resets the database it runs on, so it refuses to start
+// `make eval` calls the real model and resets the database it runs on, so it refuses to start
 // without a key, and refuses any database that is not on this machine.
 
 export class EvalRefused extends Error {
@@ -9,6 +9,7 @@ export class EvalRefused extends Error {
 
 export interface EvalConfig {
   connectionString: string;
+  choice: ModelChoice;
   modelId: string;
   rounds: number;
 }
@@ -17,12 +18,14 @@ const DEFAULT_ROUNDS = 3;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 export function evalConfigFromEnv(env: Record<string, string | undefined>): EvalConfig {
-  if (!env.ANTHROPIC_API_KEY?.trim()) {
-    throw new EvalRefused("ANTHROPIC_API_KEY is not set. The eval runs the real model; see .env.example.");
+  const choice = modelChoiceFromEnv(env);
+  if (choice === null) {
+    throw new EvalRefused("Neither ANTHROPIC_API_KEY nor GEMINI_API_KEY is set. The eval runs the real model; see .env.example.");
   }
   return {
     connectionString: localConnectionString(env),
-    modelId: modelIdFromEnv(env),
+    choice,
+    modelId: choice.modelId,
     rounds: roundsFrom(env.EVAL_RUNS),
   };
 }

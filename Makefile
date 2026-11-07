@@ -23,7 +23,7 @@ help:
 	@echo "make setup    install dependencies"
 	@echo "make verify   the checks for one change (BASE=<branch> CHANGED=<file>)"
 	@echo "make check    the full check, as CI runs it"
-	@echo "make eval     score a live run of the real model (RUNS=3; needs ANTHROPIC_API_KEY and a local DATABASE_URL)"
+	@echo "make eval     score a live run of the real model (RUNS=3; needs ANTHROPIC_API_KEY or GEMINI_API_KEY, and a local DATABASE_URL)"
 	@echo "make docker   start Docker if it is not running (npm run sandcastle calls it)"
 
 setup:
@@ -50,8 +50,8 @@ build:
 audit:
 	npm audit --audit-level=high
 
-# Calls the paid model and resets the database to the Snapshot each run, so it refuses to start
-# without ANTHROPIC_API_KEY or with a DATABASE_URL that is not on this machine.
+# Calls a real model (paid, or Gemini's free tier) and resets the database to the Snapshot each run, so it refuses to start
+# without a model key or with a DATABASE_URL that is not on this machine.
 RUNS ?= 3
 
 eval:

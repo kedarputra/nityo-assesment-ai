@@ -22,3 +22,19 @@ export function getDatabase(): Database {
   database = drizzle({ client: pool, schema });
   return database;
 }
+
+// The tables' owner on the direct connection (docs/deployment.md, "The app's database role"): the
+// one role that may empty the audit log, so only the Reset uses it. A pool of its own, opened for
+// the one Reset and closed after it; a local Postgres has no pooler, so DATABASE_URL serves there.
+export async function withOwnerDatabase<T>(work: (db: Database) => Promise<T>): Promise<T> {
+  const connectionString = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL_UNPOOLED is not set; see .env.example.");
+  }
+  const pool = new Pool({ connectionString, max: 1 });
+  try {
+    return await work(drizzle({ client: pool, schema }));
+  } finally {
+    await pool.end();
+  }
+}

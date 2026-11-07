@@ -17,11 +17,11 @@ import { formatUsd } from "@/lib/money";
 import { BusinessRuleError, checkOrderEdit, creditCheck, type OrderEdit } from "@/rules/business-rules";
 import { recordAudit } from "./audit";
 import { skuCodesIn } from "./product-search";
+import { normaliseAddress } from "./sender";
 import { changeChecks, type ChangeCheck } from "./release-checks";
 import {
   citedSearches,
   lockReleases,
-  normaliseAddress,
   priceLines,
   releasedTodayFor,
   stockResult,

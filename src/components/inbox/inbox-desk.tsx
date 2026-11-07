@@ -10,6 +10,7 @@ import {
   inboxFilters,
   isHandled,
 } from "@/server/inbox/inbox";
+import { InboxRunProgress } from "@/components/inbox-run";
 import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
 import { ProposalPane } from "./proposal-pane";
@@ -67,7 +68,7 @@ export function InboxDesk({
         <div className="desk" data-view={query.view}>
           <section className="desk-pane desk-pane--list" aria-label="Emails">
             <GreetingCard emails={emails} agentOn={agentOn} />
-            {tipDismissed ? null : <TipCard />}
+            {tipDismissed ? null : <TipCard agentOn={agentOn} />}
             <FilterBar query={query} counts={counts} />
             <EmailList query={query} shown={shown} selectedId={selected?.emailId ?? null} />
           </section>
@@ -132,6 +133,7 @@ function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: bool
         {handled} of {total} handled
         <span className="hide-tablet"> · Press <kbd>?</kbd> for keyboard keys</span>
       </p>
+      <InboxRunProgress />
     </div>
   );
 }
@@ -144,11 +146,14 @@ function greetingCount(total: number, handled: number, agentOn: boolean): string
   return `${emailsToday} ${handled} handled so far.`;
 }
 
-function TipCard() {
+function TipCard({ agentOn }: { agentOn: boolean }) {
   return (
     <form className="tip" action={dismissTipAction}>
       <p>
-        <b>How this works:</b> the agent reads every email and drafts the order. Anything risky waits here for you.
+        <b>How this works:</b>{" "}
+        {agentOn
+          ? "the agent reads every email and drafts the order. Anything risky waits here for you."
+          : "once the agent is switched on, it reads every email and drafts the order, and anything risky waits here for you. For now, every email is yours to read."}{" "}
         Each status has an icon and words: <b>✓ Done</b>, <b>! Needs you</b>, <b>○ Not run yet</b>.
       </p>
       <button type="submit" className="btn btn--ghost" aria-label="Dismiss the tip">

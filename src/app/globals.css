@@ -226,6 +226,42 @@ header .right {
   align-items: center;
 }
 
+/* The account menu: the person's name, and for an admin Run all and Reset to 07:00. */
+.account {
+  position: relative;
+}
+
+.account summary {
+  list-style: none;
+}
+
+.account summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--s2));
+  z-index: 10;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 2 * var(--s4)));
+  display: grid;
+  gap: var(--s1);
+  justify-items: start;
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--pop);
+}
+
+.account-confirm {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s2);
+}
+
 @media (max-width: 767px) {
   .hide-phone {
     display: none;
@@ -516,11 +552,31 @@ input::placeholder {
   }
 }
 
-/* The narrowest phones keep the tabs and Sign out on one line by dropping the avatar too. */
-@media (max-width: 399px) {
-  .who {
-    display: none;
-  }
+/* The account menu's button: the avatar, and on a wider screen the name and role. */
+.account summary.who {
+  min-height: var(--btn);
+  padding: 0 var(--s2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.account summary.who:hover,
+.account[open] summary.who {
+  background: var(--accent-soft);
+}
+
+.account summary.who:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.who-caret {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.account-note {
+  padding: var(--s2);
 }
 
 .who-name {
@@ -846,6 +902,18 @@ nav.tabs a[aria-current="page"] {
   background: var(--sun);
   border-radius: inherit;
   transition: width var(--base) var(--ease);
+}
+
+/* Run all's progress in the greeting card: "Reading 12 of 40…", and how the run ended. */
+.inbox-run {
+  margin-top: var(--s2);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.inbox-run[hidden] {
+  display: none;
 }
 
 .tip {

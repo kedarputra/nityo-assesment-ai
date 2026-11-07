@@ -106,9 +106,11 @@ a local run. None is committed.
 | Variable | Read by | Production | Preview |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | the app | Neon `main`, pooled, as `harbor_point_web` (above) | Neon `preview`, pooled, as `harbor_point_web` |
-| `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset` | Neon `main`, direct (injected) | Neon `preview`, direct |
+| `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset`, the in-app Reset | Neon `main`, direct (injected) | Neon `preview`, direct |
 | `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production`, or unset (below) | key from `harbor-point-preview`, or unset |
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
+| `GEMINI_API_KEY` | the agent, when `ANTHROPIC_API_KEY` is unset | free key from Google AI Studio, or unset | same, or unset |
+| `GEMINI_MODEL` | the agent | optional; `gemini-3.8-flash` when unset | same |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
 | `SEED_ADMIN_PASSWORD` | the user seed | `admin`'s password, 12+ characters | its own value |
 | `SEED_ASSESSOR_USERNAME` | the user seed | the assessors' username | same or its own |
@@ -137,7 +139,16 @@ the agent is to stop the run with the calm message from `DESIGN.md`, never retry
 
 No test, `make verify` or `make check` calls the model, so CI needs no key.
 
-**Without a key the agent is off, and nothing else changes.** Leave `ANTHROPIC_API_KEY` unset (or
+**The agent for free: Gemini.** With `ANTHROPIC_API_KEY` unset and `GEMINI_API_KEY` set, the
+agent runs on Gemini's free tier through its OpenAI-compatible endpoint
+([`src/model/openai-compatible-model.ts`](../src/model/openai-compatible-model.ts)). Create the key
+at aistudio.google.com/apikey (no card), add it in Vercel → Settings → Environment Variables for
+Production, and redeploy. The free tier is rate-limited: a per-minute limit is waited out and
+retried (up to three times, 30 s at most each); a per-day limit stops the run with the spend-limit
+message until the quota resets at midnight Pacific. Free-tier prompts may be used by Google to
+improve its products; the data pack is fictional. Anthropic wins when both keys are set.
+
+**Without a key the agent is off, and nothing else changes.** Leave both keys unset (or
 empty) in an environment and that deploy serves the full desk (sign-in, the inbox, review, the
 audit log) with the agent switched off: the Proposal pane says so in place of "Run the agent", and
 the run action refuses before it writes anything, so no failed Agent runs pile up and nothing is
@@ -146,8 +157,11 @@ spent. Setting the key and redeploying turns the agent on
 
 ## Resetting production
 
-The admin's "Reset to 07:00", in the account menu once that screen is built, returns the ERP, the
-inbox and the audit log to the Snapshot from inside the app. From a terminal, with production's
+The admin's "Reset to 07:00", in the header's account menu, returns the ERP, the inbox and the
+audit log to the Snapshot from inside the app, on `DATABASE_URL_UNPOOLED`. It keeps the users,
+their sessions and the rate-limit counts, so everyone stays signed in, and the new audit log starts
+with "reset by <user>". It is refused while a run holds the lock ("A run is in progress. Stop it
+first."), and an admin may reset 3 times an hour. From a terminal, with production's
 `DATABASE_URL`, `DATABASE_URL_UNPOOLED` and `SEED_*` values (from the Neon console and wherever the
 passwords are kept) in a gitignored file such as `.env.production.local`:
 

@@ -1,8 +1,8 @@
 import { formatBusinessDay } from "@/lib/business-clock";
+import { isAgentConfigured } from "@/model/agent-switch";
 import { businessDate } from "@/rules/business-rules";
 import type { SessionUser } from "@/server/auth/sessions";
-import { signOutAction } from "@/server/auth/actions";
-import { Avatar } from "./inbox/avatar";
+import { AccountMenu } from "./account-menu";
 import { HeaderNav } from "./header-nav";
 
 export const MAIN_CONTENT_ID = "main";
@@ -20,7 +20,9 @@ export function SkipLink() {
   );
 }
 
-export function SiteHeader({ user }: { user: SessionUser | null }) {
+// `runGoing`: whether an Inbox run or an Agent run holds the lock, so an admin's menu offers Stop.
+export function SiteHeader({ user, runGoing = false }: { user: SessionUser | null; runGoing?: boolean }) {
+  const agentOn = isAgentConfigured();
   return (
     <header className="top">
       <span className="wordmark" translate="no">
@@ -31,19 +33,13 @@ export function SiteHeader({ user }: { user: SessionUser | null }) {
         <span className="right">
           {/* The business clock is fixed on the day of the inbox (case policy 1). */}
           <span className="meta hide-tablet">{formatBusinessDay(new Date(`${businessDate}T12:00:00Z`))} 2026</span>
-          <span className="who">
-            {/* "ops.reviewer" reads as two words, so its initials are "OR". */}
-            <Avatar name={user.username.replace(/[._-]+/g, " ")} />
-            <span className="who-text hide-phone">
-              <span className="who-name">{user.username}</span>
-              <span className="who-role">{ROLE_NAMES[user.role]}</span>
-            </span>
-          </span>
-          <form action={signOutAction}>
-            <button type="submit" className="btn btn--ghost">
-              Sign out
-            </button>
-          </form>
+          <AccountMenu
+            username={user.username}
+            roleName={ROLE_NAMES[user.role]}
+            isAdmin={user.role === "admin"}
+            runGoing={runGoing}
+            agentOn={agentOn}
+          />
         </span>
       ) : null}
     </header>

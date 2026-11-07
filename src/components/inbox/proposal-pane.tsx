@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
+import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
 import { formatBusinessDay } from "@/lib/business-clock";
 import { formatUsd } from "@/lib/money";
 import { AGENT_OFF_MESSAGE } from "@/model/agent-switch";
@@ -73,6 +74,8 @@ export function ProposalPane({
         <RoutedCard key={index} request={request} />
       ))}
       {work.flags.length > 0 ? <Flags flags={work.flags} /> : null}
+      {work.related.length > 0 ? <Related related={work.related} /> : null}
+      {work.context.length > 0 ? <AgentNotes notes={work.context} /> : null}
       {work.notes.length > 0 ? <Notes notes={work.notes} /> : null}
       {work.draftReply !== null ? <DraftReplyEditor emailId={email.emailId} reply={work.draftReply} /> : null}
     </div>
@@ -117,20 +120,35 @@ function StillReading() {
   );
 }
 
+// A failed run can run again: "Run the agent" withdraws its undecided Proposals and starts afresh.
 function RunDidNotFinish({ email, errorClass }: { email: InboxEmailWithBody; errorClass: string | null }) {
   return (
     <div className="pane-empty">
       <StatusPill status={email.status} />
       <div className="card card--bad">
-        <h2 className="headline">The agent didn’t finish this email</h2>
-        <p>
-          Nothing it couldn’t finish was released. Its steps so far are in the audit log; read the email and handle it
-          yourself for now.
-        </p>
+        <h2 className="headline">{didNotFinishHeadline(errorClass)}</h2>
+        <p>{didNotFinishNextStep(errorClass)}</p>
         {errorClass ? <p className="meta id">{errorClass}</p> : null}
       </div>
+      <RunAgentButton emailId={email.emailId} />
     </div>
   );
+}
+
+function didNotFinishHeadline(errorClass: string | null): string {
+  if (isTimedOut(errorClass)) return "The agent timed out on this email";
+  if (errorClass === SPEND_LIMIT_ERROR_CLASS) return "The model’s spending limit is reached, so runs are paused";
+  return "The agent didn’t finish this email";
+}
+
+function didNotFinishNextStep(errorClass: string | null): string {
+  if (isTimedOut(errorClass)) {
+    return "Nothing it couldn’t finish was released. Run it again: it starts afresh, and its steps so far are in the audit log.";
+  }
+  if (errorClass === SPEND_LIMIT_ERROR_CLASS) {
+    return "Nothing it couldn’t finish was released. Ask an admin to raise the limit, then run it again.";
+  }
+  return "Nothing it couldn’t finish was released. Its steps so far are in the audit log; run it again, or read the email and handle it yourself.";
 }
 
 function emailHref(emailId: string): string {
@@ -175,6 +193,39 @@ function NoActionCard({ noAction }: { noAction: NoActionView }) {
       ) : null}
       <p className="meta">{noAction.note}</p>
     </article>
+  );
+}
+
+// Shown on both emails of a link, so a reviewer sees the whole story (ticket 08 of the map).
+function Related({ related }: { related: EmailWork["related"] }) {
+  return (
+    <section className="thinks" aria-label="Related emails">
+      <h3 className="who">Related</h3>
+      <ul className="checks">
+        {related.map((link) => (
+          <li key={link.emailId}>
+            <span>
+              Related: <Link href={emailHref(link.emailId)}>{link.emailId}</Link> {link.why}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function AgentNotes({ notes }: { notes: string[] }) {
+  return (
+    <section className="thinks" aria-label="What the agent noted">
+      <h3 className="who">What the agent noted</h3>
+      <ul className="checks">
+        {notes.map((note, index) => (
+          <li key={index}>
+            <span>{note}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -252,6 +303,8 @@ function changeHeadline(proposal: ProposalView, kind: "order change" | "cancella
       return `${what} for ${proposal.customerName}: rejected`;
     case "held":
       return `${what} for ${proposal.customerName} is on hold, ${change}`;
+    case "superseded":
+      return `${what} for ${proposal.customerName} was replaced by a later run`;
     case "open":
       if (proposal.checks.some((check) => !check.passes && isHardRule(check.check))) {
         return `${order} can’t be ${kind === "cancellation" ? "cancelled" : "changed"} (${change})`;
@@ -270,6 +323,8 @@ function newOrderHeadline(proposal: ProposalView): string {
       return `The order from ${proposal.customerName} was rejected`;
     case "held":
       return `The order from ${proposal.customerName} is on hold, ${total}`;
+    case "superseded":
+      return `The order from ${proposal.customerName} was replaced by a later run`;
     case "open":
       if (proposal.checks.some((check) => !check.passes && isHardRule(check.check))) {
         return `${proposal.customerName} can’t get this order yet (${total})`;
@@ -300,6 +355,7 @@ const DECISION_WORDS: Record<ProposalView["status"], { pill: string; icon: strin
   rejected: { pill: "rejected", icon: "✕", label: "Rejected" },
   held: { pill: "on_hold", icon: "◐", label: "On hold" },
   open: { pill: "needs_you", icon: "!", label: "Needs you" },
+  superseded: { pill: "no_action", icon: "–", label: "Replaced by a later run" },
 };
 
 // A requested date is a calendar day; noon at Harbor Point keeps it on that day in any zone.

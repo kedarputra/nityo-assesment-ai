@@ -1,15 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type {
-  AssistantMessage,
-  Model,
-  ModelMessage,
-  ModelRequest,
-  ModelResponse,
-  StopReason,
-  ToolDefinition,
+import { DEFAULT_ANTHROPIC_MODEL_ID } from "./agent-switch";
+import {
+  SpendLimitReached,
+  type AssistantMessage,
+  type Model,
+  type ModelMessage,
+  type ModelRequest,
+  type ModelResponse,
+  type StopReason,
+  type ToolDefinition,
 } from "./model";
 
-export const DEFAULT_MODEL_ID = "claude-opus-5-5";
+export const DEFAULT_MODEL_ID = DEFAULT_ANTHROPIC_MODEL_ID;
 
 // Large enough that a turn with reasoning and several tool calls is not cut off, and small
 // enough for a non-streaming request to stay inside the SDK's HTTP timeout.
@@ -17,7 +19,7 @@ const MAX_TOKENS = 16_000;
 
 export function modelIdFromEnv(env: Record<string, string | undefined> = process.env): string {
   const configured = env.ANTHROPIC_MODEL?.trim();
-  return configured ? configured : DEFAULT_MODEL_ID;
+  return configured ? configured : DEFAULT_ANTHROPIC_MODEL_ID;
 }
 
 /** The one part of the SDK client this model uses; tests hand in a stub. */
@@ -37,14 +39,21 @@ export class AnthropicModel implements Model {
   }
 
   async send(request: ModelRequest): Promise<ModelResponse> {
-    const reply = await this.messagesClient().messages.create({
-      model: this.modelId,
-      max_tokens: MAX_TOKENS,
-      thinking: { type: "adaptive" },
-      system: request.system,
-      tools: request.tools.map(toApiTool),
-      messages: request.messages.map(toApiMessage),
-    });
+    const reply = await this.messagesClient()
+      .messages.create({
+        model: this.modelId,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: "adaptive" },
+        system: request.system,
+        tools: request.tools.map(toApiTool),
+        messages: request.messages.map(toApiMessage),
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Anthropic.APIError && isSpendLimitAnswer(error.status, apiErrorText(error))) {
+          throw new SpendLimitReached();
+        }
+        throw error;
+      });
     return {
       message: { role: "assistant", content: reply.content.map(fromApiBlock) },
       stopReason: fromApiStopReason(reply.stop_reason),
@@ -54,9 +63,35 @@ export class AnthropicModel implements Model {
 
   // Created on first use, so building or importing the app needs no API key.
   private messagesClient(): MessagesClient {
-    this.client ??= new Anthropic();
+    this.client ??= new Anthropic({ fetch: withoutSpendLimitRetries(globalThis.fetch) });
     return this.client;
   }
+}
+
+// Anthropic's answer when the workspace's spend limit is reached: 400 "usage limits", or 429
+// `enforced_spend_limit_reached` (docs/deployment.md, "The API keys and their caps").
+export function isSpendLimitAnswer(status: number | undefined, body: string): boolean {
+  if (status === 429) return body.includes("enforced_spend_limit_reached");
+  if (status === 400) return /usage limits?/i.test(body);
+  return false;
+}
+
+function apiErrorText(error: InstanceType<typeof Anthropic.APIError>): string {
+  return `${error.message} ${JSON.stringify(error.error ?? {})}`;
+}
+
+// The SDK retries every 429 on its own. A spend limit fails the same way every time, so its answer
+// is marked not to be retried; any other 429 is still retried.
+export function withoutSpendLimitRetries(fetchFunction: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const response = await fetchFunction(input, init);
+    if (response.status !== 429) return response;
+    const body = await response.clone().text();
+    if (!isSpendLimitAnswer(response.status, body)) return response;
+    const headers = new Headers(response.headers);
+    headers.set("x-should-retry", "false");
+    return new Response(body, { status: response.status, statusText: response.statusText, headers });
+  };
 }
 
 function toApiTool(tool: ToolDefinition): Anthropic.Tool {

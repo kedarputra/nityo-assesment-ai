@@ -12,6 +12,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
@@ -200,6 +201,27 @@ export const signInThrottle = pgTable("sign_in_throttle", {
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
 });
 
+// The actions a person may take only so often (security 7), one row each time they took one. The
+// in-app Reset keeps this table, so a reset never refills its own allowance.
+export const rateLimitedActions = ["agent-run", "reset"] as const;
+export type RateLimitedAction = (typeof rateLimitedActions)[number];
+
+export const rateLimitEvents = pgTable(
+  "rate_limit_events",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: text("action", { enum: rateLimitedActions }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("rate_limit_events_user_action_at_idx").on(table.userId, table.action, table.at),
+    check("rate_limit_events_action_check", sql`${table.action} in ('agent-run', 'reset')`),
+  ],
+);
+
 // ---- The agent's work -----------------------------------------------------------------------------
 
 // `routed`: the agent sent a Request to a person with a summary, without proposing an ERP change.
@@ -227,6 +249,31 @@ export type RequestKind = (typeof requestKinds)[number];
 export const noActionReasons = ["spam", "auto-reply", "duplicate"] as const;
 export type NoActionReason = (typeof noActionReasons)[number];
 
+// An Inbox run (ADR 0003): the browser runs the agent on each unprocessed Email in turn, and this
+// row is the lock that allows one at a time. It holds the lock while `ended_at` is null: until it
+// finishes, an admin stops it, a spend limit stops it, or a later Run all finds it abandoned.
+export const inboxRunEndReasons = ["finished", "stopped", "spend-limit", "abandoned"] as const;
+export type InboxRunEndReason = (typeof inboxRunEndReasons)[number];
+
+export const inboxRuns = pgTable(
+  "inbox_runs",
+  {
+    id: serial("id").primaryKey(),
+    startedBy: integer("started_by")
+      .notNull()
+      .references(() => users.id),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    // When the browser last asked for an email; a closed tab stops asking.
+    lastStepAt: timestamp("last_step_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endReason: text("end_reason", { enum: inboxRunEndReasons }),
+  },
+  (table) => [
+    check("inbox_runs_end_reason_check", sql`${table.endReason} in ('finished', 'stopped', 'spend-limit', 'abandoned')`),
+    check("inbox_runs_ended_check", sql`(${table.endedAt} is null) = (${table.endReason} is null)`),
+  ],
+);
+
 // One Agent run over one Email (speed and observability: the Agent run record). A run with no
 // `ended_at` is still reading. Cost is integer micro-dollars, so it is never a float.
 export const agentRuns = pgTable(
@@ -252,6 +299,8 @@ export const agentRuns = pgTable(
     noActionReason: text("no_action_reason", { enum: noActionReasons }),
     noActionNote: text("no_action_note"),
     duplicateOfEmailId: text("duplicate_of_email_id").references(() => emails.emailId),
+    // The Inbox run this Agent run was part of, if any.
+    inboxRunId: integer("inbox_run_id").references(() => inboxRuns.id),
   },
   (table) => [
     index("agent_runs_email_id_idx").on(table.emailId),
@@ -270,8 +319,9 @@ export const agentRuns = pgTable(
 );
 
 // `held` waits on something outside the desk and can still be decided; `rejected` is final, and so
-// is `released` once its 10-second Undo has passed.
-export const proposalStatuses = ["open", "released", "rejected", "held"] as const;
+// is `released` once its 10-second Undo has passed. `superseded`: a later Agent run on the same
+// email withdrew it while it was still open; it is kept, never deleted.
+export const proposalStatuses = ["open", "released", "rejected", "held", "superseded"] as const;
 export type ProposalStatus = (typeof proposalStatuses)[number];
 
 // What a Proposal does in the ERP: a new sales order, or a change or cancellation of an existing
@@ -336,7 +386,9 @@ export const proposals = pgTable(
   },
   (table) => [
     index("proposals_email_id_idx").on(table.emailId),
-    check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held')`),
+    // A sales order is one Proposal's release, so no release is ever counted twice.
+    uniqueIndex("proposals_so_number_idx").on(table.soNumber),
+    check("proposals_status_check", sql`${table.status} in ('open', 'released', 'rejected', 'held', 'superseded')`),
     check("proposals_kind_check", sql`${table.kind} in ('new order', 'order change', 'cancellation')`),
     check("proposals_target_check", sql`(${table.kind} = 'new order') = (${table.targetSoNumber} is null)`),
   ],
@@ -452,6 +504,33 @@ export const emailNotes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("email_notes_email_id_idx").on(table.emailId)],
+);
+
+// Two emails that belong together (ticket 08 of the map): the run on the later email links it to an
+// earlier one from the same customer today, and the desk shows the link on both. A link never
+// changes the earlier email's Proposal; one that may be the same order flags the later email.
+export const emailLinks = pgTable(
+  "email_links",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.runId),
+    // The email whose run made the link, and the earlier email it links to.
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    relatedEmailId: text("related_email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    why: text("why").notNull(),
+    possiblySameOrder: boolean("possibly_same_order").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("email_links_email_id_idx").on(table.emailId),
+    index("email_links_related_email_id_idx").on(table.relatedEmailId),
+  ],
 );
 
 // A reply the agent wrote for a person to edit and approve. It is never sent. Once a person marks

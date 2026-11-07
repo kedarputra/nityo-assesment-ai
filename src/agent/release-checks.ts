@@ -14,6 +14,7 @@ export const releaseChecks = [
   "credit-hold",
   "credit-limit",
   "ship-to",
+  "single-ship-to",
   "no-flags",
 ] as const;
 export type ReleaseCheck = (typeof releaseChecks)[number];

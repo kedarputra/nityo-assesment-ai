@@ -198,8 +198,10 @@ One of each.
 - **Sign-in.** Two halves of one card on a desk: on the left, an `accent-soft` panel saying what the
   desk does (a teal kicker, a 30px headline, three numbered points, the inbox's day); on the right,
   the form. On a phone the form comes first and the panel follows, so signing in never needs a scroll.
-- **Account.** At the right of the header: the business date (desk only), an avatar with the
-  username and role (the avatar alone on phones, nothing under 400px), and "Sign out".
+- **Account.** At the right of the header: the business date (desk only), then the account menu.
+  Its button is the avatar with the username and role (the avatar alone on phones) and a small
+  caret; it opens a menu with "Sign out", and for an admin "Run all" (or "Stop the run") and
+  "Reset to 07:00…". With the agent switched off, an admin sees a one-line note in place of Run all.
 
 ## Interaction
 
