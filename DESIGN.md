@@ -2,56 +2,56 @@
 version: 2
 name: Harbor Point Order Desk
 description: >-
-  A friendly desk for the ops team's order inbox: warm cream ground, soft white cards, rounded
-  shapes, one harbour-teal accent and a little sunshine for good news. Plain, kind words; phone-first
+  A friendly desk for the ops team's order inbox: an apricot-cream ground, white cards, rounded
+  shapes, one dusk-blue accent (apricot on the dark theme) and pumpkin-spice warmth for good news. Plain, kind words; phone-first
   layouts that grow into three panes on a desk. Plus Jakarta Sans for words, DM Mono for identifiers.
   Status is never colour alone.
 
 colors:
   light:
-    canvas: "#f6f3ee"          # warm cream: the page behind the cards
-    surface: "#ffffff"         # cards, panes, inputs
-    sunken: "#f0ece5"          # the quoted email, table heads, wells
-    hairline: "#e6e0d6"        # dividers (decorative only)
-    control-border: "#8d8578"  # input and checkbox edges (3.6:1 on surface)
-    ink: "#22201c"
-    ink-muted: "#5e584f"
-    ink-faint: "#8d8578"       # disabled text and placeholders only
-    accent: "#0b6c73"          # harbour teal: primary button, links, focus, selection
-    accent-hover: "#085a60"
-    accent-soft: "#dff1f0"     # selected row, "what the agent thinks"
+    canvas: "#fbf6ee"           # warm apricot-cream ground: the page behind the cards
+    surface: "#ffffff"          # white: cards, panes, inputs
+    sunken: "#f5eee3"           # the quoted email, table heads, wells
+    hairline: "#ebe3d6"         # dividers (decorative only)
+    control-border: "#878aa0"   # input and checkbox edges (3.4:1 on surface)
+    ink: "#1f2236"
+    ink-muted: "#555a72"
+    ink-faint: "#878aa0"        # disabled text and placeholders only
+    accent: "#4e598c"           # dusk blue: primary button, links, focus, selection
+    accent-hover: "#3f4875"
+    accent-soft: "#e6e8f2"      # selected row, "what the agent thinks"
     on-accent: "#ffffff"
-    sun: "#f6b14f"             # good-news highlight: progress, all-clear; always under ink text
-    sun-soft: "#fdf0d9"
+    sun: "#ff8c42"              # pumpkin spice: progress, all-clear; always under ink text
+    sun-soft: "#fdefdc"
     ok: "#1d7543"
     ok-soft: "#e3f4e9"
-    warn: "#8a5300"
-    warn-soft: "#fff0d4"
+    warn: "#9c4a10"             # burnt pumpkin: text on warn-soft (5:1)
+    warn-soft: "#ffe9d4"
     bad: "#b0251d"
     bad-soft: "#fde8e5"
-    avatar: ["#dff1f0", "#fdf0d9", "#e1edf8", "#efe7da", "#f9e3e6"]   # sender initials, by name
+    avatar: ["#e6e8f2", "#fdefdc", "#ffe3cc", "#fbe8c4", "#ecebf3"]   # sender initials, by name
   dark:
-    canvas: "#141517"
-    surface: "#1d1f22"
-    sunken: "#18191c"
-    hairline: "#2e3035"
-    control-border: "#7d786f"
-    ink: "#efede8"
-    ink-muted: "#ada89f"
-    ink-faint: "#7d786f"
-    accent: "#63c2c9"
-    accent-hover: "#82d0d6"
-    accent-soft: "#173a3d"
-    on-accent: "#082628"
-    sun: "#f4b45e"
-    sun-soft: "#3a2d14"
+    canvas: "#151726"
+    surface: "#1e2135"
+    sunken: "#191c2d"
+    hairline: "#2e3250"
+    control-border: "#7f84a3"
+    ink: "#f3f1ec"
+    ink-muted: "#b2b5c7"
+    ink-faint: "#7f84a3"
+    accent: "#f9c784"           # apricot cream: on dusk-blue night it carries the accent
+    accent-hover: "#fcaf58"     # sandy brown
+    accent-soft: "#2c3357"      # dusk blue: the selected row
+    on-accent: "#1f2236"
+    sun: "#ff8c42"
+    sun-soft: "#3d2a1c"
     ok: "#74d19a"
     ok-soft: "#183322"
-    warn: "#eab15a"
-    warn-soft: "#382b13"
+    warn: "#fcaf58"             # sandy brown
+    warn-soft: "#3a2a17"
     bad: "#f58b80"
     bad-soft: "#3d1d1a"
-    avatar: ["#173a3d", "#3a2d14", "#1b2d40", "#332b20", "#3d2228"]
+    avatar: ["#2c3357", "#3d2a1c", "#40281a", "#3a3046", "#262b42"]
 
 typography:
   sans: "'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif"
@@ -68,13 +68,17 @@ typography:
 rounded: { sm: 6px, md: 10px, lg: 14px, xl: 20px, pill: 9999px }
 spacing: { 1: 4px, 2: 8px, 3: 12px, 4: 16px, 5: 24px, 6: 32px, 7: 48px }
 elevation:
-  card: "0 1px 2px rgb(34 32 28 / .05)"                                       # cards resting on the cream
-  popover: "0 2px 4px rgb(34 32 28 / .06), 0 12px 32px rgb(34 32 28 / .14)"   # toasts, menus, sheets
+  card: "0 1px 2px rgb(31 34 54 / .05)"                                       # cards resting on the cream
+  popover: "0 2px 4px rgb(31 34 54 / .06), 0 12px 32px rgb(31 34 54 / .14)"   # toasts, menus, sheets
 motion: { fast: 140ms, base: 200ms, easing: "cubic-bezier(.2,.8,.2,1)" }
 breakpoints: { phone: "< 768px", tablet: "768–1199px", desk: "≥ 1200px" }
 ---
 
 # Harbor Point Order Desk
+
+<!-- Palette (2026-11-07, the developer's choice): Dusk Blue #4E598C, White #FFFFFF, Apricot Cream
+#F9C784, Sandy Brown #FCAF58, Pumpkin Spice #FF8C42. Text colours are darkened or lightened from
+them where contrast needs it; green and red stay for Done and errors, so status keeps its meaning. -->
 
 The design standard for every screen this repository builds. Only the developer's own request
 outranks it. Words are defined in [`CONTEXT.md`](CONTEXT.md). The layout was chosen in
@@ -175,7 +179,7 @@ One of each.
 - **Kind tag.** Pill in `sunken` with `ink-muted` text: "New order", "Order change",
   "Cancellation", "Return", "Billing dispute", "Quote request", "Order inquiry", "No action".
 - **Email row.** Avatar (initials, 36px circle), sender and time on the first line, the subject on
-  the second, kind and status on the third. The selected row gets `accent-soft` and a 3px teal edge.
+  the second, kind and status on the third. The selected row gets `accent-soft` and a 3px accent edge.
   The whole row is one button, at least 64px tall.
 - **Greeting card.** At the top of the list: "Good morning" in `greeting`, the day's count in words,
   and a progress bar in `sun` on `sun-soft` showing emails handled out of the day's total.
@@ -196,7 +200,7 @@ One of each.
 - **Audit log.** A table on a desk, a list of cards on a phone: when, who (agent, gate, or a named
   person), what, which email, and the detail. Newest first, filterable by email.
 - **Sign-in.** Two halves of one card on a desk: on the left, an `accent-soft` panel saying what the
-  desk does (a teal kicker, a 30px headline, three numbered points, the inbox's day); on the right,
+  desk does (an accent kicker, a 30px headline, three numbered points, the inbox's day); on the right,
   the form. On a phone the form comes first and the panel follows, so signing in never needs a scroll.
 - **Account.** At the right of the header: the business date (desk only), then the account menu.
   Its button is the avatar with the username and role (the avatar alone on phones) and a small
@@ -208,7 +212,7 @@ One of each.
 - **Keys on a desk** (shown as hints, never intercepted while typing): `j` / `k` next or previous,
   `a` approve, `r` reject, `h` hold, `?` the list of keys. Phones and tablets get visible buttons
   for every action; nothing depends on a key, hover or swipe.
-- **Focus** is always visible: a 2px teal ring offset 2px. After a decision, focus and selection move
+- **Focus** is always visible: a 2px accent ring offset 2px. After a decision, focus and selection move
   to the next email that needs you.
 - **Reasons are typed inline**, never in a browser prompt; Enter confirms, Esc cancels.
 - **The URL holds the state:** the selected email, the filter, and the phone's list or detail view.

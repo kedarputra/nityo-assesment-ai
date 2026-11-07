@@ -103,7 +103,7 @@ describe("InboxDesk, the list", () => {
     const html = renderDesk({ query: { filter: "other" } });
 
     const filter = (value: string, current: boolean, words: string, shown: number) =>
-      `<a class="filter"${current ? ' aria-current="true"' : ""} href="/?filter=${value}">${words}<span class="filter-count">${shown}</span><span aria-hidden="true" class="pending-hint"></span></a>`;
+      `<a class="filter"${current ? ' aria-current="true"' : ""} href="/?filter=${value}">${words}<span class="filter-count">${shown}</span></a>`;
 
     expect(html).toContain(filter("all", false, "All", 2));
     expect(html).toContain(filter("needs-you", false, "Needs you", 0));

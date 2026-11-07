@@ -2,31 +2,31 @@
 :root {
   color-scheme: light dark;
 
-  --canvas: #f6f3ee;
+  --canvas: #fbf6ee;
   --surface: #ffffff;
-  --sunken: #f0ece5;
-  --hairline: #e6e0d6;
-  --control-border: #8d8578;
-  --ink: #22201c;
-  --ink-muted: #5e584f;
-  --ink-faint: #8d8578;
-  --accent: #0b6c73;
-  --accent-hover: #085a60;
-  --accent-soft: #dff1f0;
+  --sunken: #f5eee3;
+  --hairline: #ebe3d6;
+  --control-border: #878aa0;
+  --ink: #1f2236;
+  --ink-muted: #555a72;
+  --ink-faint: #878aa0;
+  --accent: #4e598c;
+  --accent-hover: #3f4875;
+  --accent-soft: #e6e8f2;
   --on-accent: #ffffff;
-  --sun: #f6b14f;
-  --sun-soft: #fdf0d9;
+  --sun: #ff8c42;
+  --sun-soft: #fdefdc;
   --ok: #1d7543;
   --ok-soft: #e3f4e9;
-  --warn: #8a5300;
-  --warn-soft: #fff0d4;
+  --warn: #9c4a10;
+  --warn-soft: #ffe9d4;
   --bad: #b0251d;
   --bad-soft: #fde8e5;
-  --av0: #dff1f0;
-  --av1: #fdf0d9;
-  --av2: #e1edf8;
-  --av3: #efe7da;
-  --av4: #f9e3e6;
+  --av0: #e6e8f2;
+  --av1: #fdefdc;
+  --av2: #ffe3cc;
+  --av3: #fbe8c4;
+  --av4: #ecebf3;
 
   /* --font-sans and --font-mono are set by next/font in the root layout. */
   --sans: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -46,8 +46,8 @@
   --s6: 32px;
   --s7: 48px;
 
-  --card: 0 1px 2px rgb(34 32 28 / 0.05);
-  --pop: 0 2px 4px rgb(34 32 28 / 0.06), 0 12px 32px rgb(34 32 28 / 0.14);
+  --card: 0 1px 2px rgb(31 34 54 / 0.05);
+  --pop: 0 2px 4px rgb(31 34 54 / 0.06), 0 12px 32px rgb(31 34 54 / 0.14);
 
   --fast: 140ms;
   --base: 200ms;
@@ -59,31 +59,31 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #141517;
-    --surface: #1d1f22;
-    --sunken: #18191c;
-    --hairline: #2e3035;
-    --control-border: #7d786f;
-    --ink: #efede8;
-    --ink-muted: #ada89f;
-    --ink-faint: #7d786f;
-    --accent: #63c2c9;
-    --accent-hover: #82d0d6;
-    --accent-soft: #173a3d;
-    --on-accent: #082628;
-    --sun: #f4b45e;
-    --sun-soft: #3a2d14;
+    --canvas: #151726;
+    --surface: #1e2135;
+    --sunken: #191c2d;
+    --hairline: #2e3250;
+    --control-border: #7f84a3;
+    --ink: #f3f1ec;
+    --ink-muted: #b2b5c7;
+    --ink-faint: #7f84a3;
+    --accent: #f9c784;
+    --accent-hover: #fcaf58;
+    --accent-soft: #2c3357;
+    --on-accent: #1f2236;
+    --sun: #ff8c42;
+    --sun-soft: #3d2a1c;
     --ok: #74d19a;
     --ok-soft: #183322;
-    --warn: #eab15a;
-    --warn-soft: #382b13;
+    --warn: #fcaf58;
+    --warn-soft: #3a2a17;
     --bad: #f58b80;
     --bad-soft: #3d1d1a;
-    --av0: #173a3d;
-    --av1: #3a2d14;
-    --av2: #1b2d40;
-    --av3: #332b20;
-    --av4: #3d2228;
+    --av0: #2c3357;
+    --av1: #3d2a1c;
+    --av2: #40281a;
+    --av3: #3a3046;
+    --av4: #262b42;
 
     --card: 0 1px 2px rgb(0 0 0 / 0.3);
     --pop: 0 2px 4px rgb(0 0 0 / 0.3), 0 12px 32px rgb(0 0 0 / 0.5);
@@ -1558,57 +1558,112 @@ kbd {
   justify-items: start;
 }
 
-/* A link whose page is on its way (PendingHint): a thin accent bar along its foot, and a row or a
-   chip tinted at once, so a click is never silent while the server renders. */
-.row,
-.filter,
-nav.tabs a {
-  position: relative;
+.audit-loading {
+  margin-top: var(--s3);
+  display: grid;
+  gap: var(--s3);
 }
 
-.pending-hint {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--accent);
-  opacity: 0;
-  transform: scaleX(0);
-  transform-origin: left;
-  pointer-events: none;
+/* Loading skeletons (LoadingSkeleton): the moment a link is clicked, a skeleton of what is coming
+   takes the place of the part of the page that will change. Shapes only, no words; a soft pulse
+   that stops for anyone who asks for less motion. */
+.desk-pane:has(> .skeleton-overlay) > :not(.skeleton-overlay),
+.rows-wrap:has(> .skeleton-overlay) > :not(.skeleton-overlay),
+#main:has(> .skeleton-overlay) > :not(.skeleton-overlay) {
+  display: none;
 }
 
-.pending-hint.is-pending {
-  opacity: 1;
-  animation: pending-bar 1.6s ease-out forwards;
+.skeleton-overlay {
+  display: grid;
+  gap: var(--s3);
+  align-content: start;
 }
 
-@keyframes pending-bar {
-  from {
-    transform: scaleX(0.05);
-  }
-  to {
-    transform: scaleX(0.9);
-  }
+.skeleton-overlay--rows {
+  padding: var(--s2) var(--s3);
 }
 
-.row:has(.is-pending),
-.filter:has(.is-pending) {
-  background: var(--accent-soft);
+.sk {
+  display: block;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.sk-head,
+.sk-row {
+  display: flex;
+  gap: var(--s3);
+  align-items: flex-start;
+}
+
+.sk-row {
+  padding: var(--s3) var(--s2);
+}
+
+.sk-lines {
+  flex: 1;
+  display: grid;
+  gap: var(--s2);
+}
+
+.sk-avatar {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--r-pill);
+}
+
+.sk-line {
+  height: 14px;
+  border-radius: var(--r-pill);
+}
+
+.sk-line--title {
+  height: 22px;
+  width: 70%;
+}
+
+.sk-line--name {
+  width: 45%;
+}
+
+.sk-line--meta {
+  width: 55%;
+}
+
+.sk-line--row {
+  height: 18px;
+  width: 100%;
+}
+
+.sk-pill {
+  width: 96px;
+  height: 24px;
+  border-radius: var(--r-pill);
+}
+
+.sk-block {
+  height: 260px;
+  border-radius: var(--r-lg);
+}
+
+.sk-card {
+  height: 120px;
+  border-radius: var(--r-lg);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pending-hint.is-pending {
+  .sk {
     animation: none;
-    transform: scaleX(1);
   }
 }
 
-.audit-loading {
-  margin-top: var(--s3);
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  color: var(--ink-muted);
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

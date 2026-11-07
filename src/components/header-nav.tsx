@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PendingHint } from "./pending-hint";
+import { LoadingSkeleton } from "./loading-skeleton";
 
 const AUDIT_LOG_PATH = "/audit";
 
@@ -19,7 +19,7 @@ export function HeaderNav() {
       {SECTIONS.map((section) => (
         <Link key={section.href} href={section.href} aria-current={pathname === section.href ? "page" : undefined}>
           {section.name}
-          <PendingHint />
+          <LoadingSkeleton into={["page"]} />
         </Link>
       ))}
     </nav>
