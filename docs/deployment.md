@@ -111,6 +111,7 @@ a local run. None is committed.
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
 | `GEMINI_API_KEY` | the agent, when `ANTHROPIC_API_KEY` is unset | free key from Google AI Studio, or unset | same, or unset |
 | `GEMINI_MODEL` | the agent | optional; `gemini-3.8-flash` when unset | same |
+| `GEMINI_REASONING_EFFORT` | the agent | optional; `low` when unset | same |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
 | `SEED_ADMIN_PASSWORD` | the user seed | `admin`'s password, 12+ characters | its own value |
 | `SEED_ASSESSOR_USERNAME` | the user seed | the assessors' username | same or its own |
@@ -146,7 +147,9 @@ at aistudio.google.com/apikey (no card), add it in Vercel → Settings → Envir
 Production, and redeploy. The free tier is rate-limited: a per-minute limit is waited out and
 retried (up to three times, 30 s at most each); a per-day limit stops the run with the spend-limit
 message until the quota resets at midnight Pacific. Free-tier prompts may be used by Google to
-improve its products; the data pack is fictional. Anthropic wins when both keys are set.
+improve its products; the data pack is fictional. Anthropic wins when both keys are set. Gemini 3
+thinks at length by default: on the first production run one tool call took three to five minutes,
+so the adapter asks for `reasoning_effort: low` and gives each call 90 s before it fails it.
 
 **Without a key the agent is off, and nothing else changes.** Leave both keys unset (or
 empty) in an environment and that deploy serves the full desk (sign-in, the inbox, review, the

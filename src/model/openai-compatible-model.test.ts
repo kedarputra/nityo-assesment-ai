@@ -153,6 +153,33 @@ describe("OpenAiCompatibleModel", () => {
   });
 });
 
+describe("OpenAiCompatibleModel, speed", () => {
+  it("asks for the reasoning effort it was given, and leaves it out otherwise", async () => {
+    const answer = () => json({ choices: [{ message: { content: "Done." }, finish_reason: "stop" }] });
+    const sentBodies: unknown[] = [];
+    const fetchStub = (async (_url: URL | RequestInfo, init?: RequestInit) => {
+      sentBodies.push(JSON.parse(String(init?.body)));
+      return answer();
+    }) as typeof fetch;
+
+    await new OpenAiCompatibleModel({ baseUrl: "https://m.example", apiKey: "k", modelId: "g", reasoningEffort: "low", fetch: fetchStub }).send(request);
+    await new OpenAiCompatibleModel({ baseUrl: "https://m.example", apiKey: "k", modelId: "g", fetch: fetchStub }).send(request);
+
+    expect(sentBodies[0]).toMatchObject({ reasoning_effort: "low" });
+    expect(sentBodies[1]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("fails a call that doesn't answer in time with a clear error, instead of hanging", async () => {
+    const neverAnswers = ((_url: URL | RequestInfo, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      })) as typeof fetch;
+    const model = new OpenAiCompatibleModel({ baseUrl: "https://m.example", apiKey: "k", modelId: "g", timeoutMs: 20, fetch: neverAnswers });
+
+    await expect(model.send(request)).rejects.toThrow("The model didn’t answer within 0 s.");
+  });
+});
+
 describe("toApiMessages", () => {
   it("sends a failed tool's result marked as an error", () => {
     const messages = toApiMessages({
