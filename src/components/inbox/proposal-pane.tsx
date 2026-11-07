@@ -7,7 +7,7 @@ import { formatUsd } from "@/lib/money";
 import { AGENT_OFF_MESSAGE } from "@/model/agent-switch";
 import type { EmailWork, LinkedProposalView, NoActionView, ProposalView, RoutedRequestView } from "@/server/inbox/email-work";
 import type { InboxEmailWithBody } from "@/server/inbox/inbox";
-import { RunAgentButton } from "./agent-run";
+import { RunAgentButton, UnlessReading } from "./agent-run";
 import { CheckList, PassingChecks } from "./checks";
 import { ChangeLines, formatChange } from "./change-lines";
 import { DraftReplyEditor, ProposalReview, SwappedFor } from "./proposal-review";
@@ -58,7 +58,13 @@ export function ProposalPane({
   if (!email) return <NothingToDecide email={null} agentOn={agentOn} />;
   if (!work) return <NothingToDecide email={email} agentOn={agentOn} />;
   if (!work.run.finished) return <StillReading />;
-  if (work.run.outcome === "failed") return <RunDidNotFinish email={email} errorClass={work.run.errorClass} />;
+  if (work.run.outcome === "failed") {
+    return (
+      <UnlessReading emailId={email.emailId} reading={<StillReading />}>
+        <RunDidNotFinish email={email} errorClass={work.run.errorClass} />
+      </UnlessReading>
+    );
+  }
 
   // The first undecided Proposal takes the desk's keys.
   const firstUndecided = work.proposals.find(isUndecided)?.id ?? null;
@@ -135,18 +141,36 @@ function RunDidNotFinish({ email, errorClass }: { email: InboxEmailWithBody; err
   );
 }
 
+// The model provider's own trouble, said in words (src/model/model.ts names these).
+const MODEL_TROUBLE: Record<string, { headline: string; nextStep: string }> = {
+  "model-busy": {
+    headline: "The model was too busy to answer",
+    nextStep: "Its servers turned the agent away for now. Nothing was released; run it again in a minute or two.",
+  },
+  "model-timeout": {
+    headline: "The model took too long to answer",
+    nextStep: "The agent stopped waiting. Nothing was released; run it again, or read the email and handle it yourself.",
+  },
+  "model-refused-request": {
+    headline: "The model couldn’t take this request",
+    nextStep: "Nothing was released. Read the email and handle it yourself; the details are in the logs.",
+  },
+};
+
 function didNotFinishHeadline(errorClass: string | null): string {
+  if (errorClass !== null && MODEL_TROUBLE[errorClass]) return MODEL_TROUBLE[errorClass].headline;
   if (isTimedOut(errorClass)) return "The agent timed out on this email";
-  if (errorClass === SPEND_LIMIT_ERROR_CLASS) return "The model’s spending limit is reached, so runs are paused";
+  if (errorClass === SPEND_LIMIT_ERROR_CLASS) return "The model’s limit is used up for now, so runs are paused";
   return "The agent didn’t finish this email";
 }
 
 function didNotFinishNextStep(errorClass: string | null): string {
+  if (errorClass !== null && MODEL_TROUBLE[errorClass]) return MODEL_TROUBLE[errorClass].nextStep;
   if (isTimedOut(errorClass)) {
     return "Nothing it couldn’t finish was released. Run it again: it starts afresh, and its steps so far are in the audit log.";
   }
   if (errorClass === SPEND_LIMIT_ERROR_CLASS) {
-    return "Nothing it couldn’t finish was released. Ask an admin to raise the limit, then run it again.";
+    return "Nothing it couldn’t finish was released. A paid key needs its spend limit raised; a free key’s daily quota comes back on its own. Then run it again.";
   }
   return "Nothing it couldn’t finish was released. Its steps so far are in the audit log; run it again, or read the email and handle it yourself.";
 }

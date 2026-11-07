@@ -446,6 +446,26 @@ describe("InboxDesk, the Proposal pane after a run", () => {
     expect(html).toContain(">Run the agent</button>");
   });
 
+  it("says in words when the model's servers were too busy, instead of a bare error", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "model-busy", requestKinds: [] },
+      proposals: [],
+      routed: [],
+      noAction: null,
+      flags: [],
+      draftReply: null,
+      notes: [],
+      context: [],
+      related: [],
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The model was too busy to answer");
+    expect(html).toContain("run it again in a minute or two");
+  });
+
   it("shows the calm spend-limit words when the model's limit stopped the run", () => {
     const failed: InboxEmailWithBody = { ...maria, status: "failed" };
     const work: EmailWork = {
@@ -462,8 +482,8 @@ describe("InboxDesk, the Proposal pane after a run", () => {
 
     const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
 
-    expect(html).toContain("The model’s spending limit is reached, so runs are paused");
-    expect(html).toContain("Ask an admin to raise the limit");
+    expect(html).toContain("The model’s limit is used up for now, so runs are paused");
+    expect(html).toContain("a free key’s daily quota comes back on its own");
   });
 
   it("shows Reading… while a run is under way", () => {

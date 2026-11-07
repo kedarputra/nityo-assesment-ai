@@ -1,4 +1,7 @@
 import {
+  ModelBusy,
+  ModelRefusedRequest,
+  ModelTimedOut,
   SpendLimitReached,
   type AssistantMessage,
   type Model,
@@ -90,7 +93,7 @@ export class OpenAiCompatibleModel implements Model {
         });
       } catch (error) {
         if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
-          throw new Error(`The model didn’t answer within ${Math.round(timeoutMs / 1000)} s.`);
+          throw new ModelTimedOut(`The model didn’t answer within ${Math.round(timeoutMs / 1000)} s.`);
         }
         throw error;
       }
@@ -101,7 +104,8 @@ export class OpenAiCompatibleModel implements Model {
       const retryable = response.status === 429 || response.status === 500 || response.status === 503;
       if (!retryable || attempt >= MAX_RETRIES) {
         // The body is the provider's error, never the key; cut short so a log line stays a line.
-        throw new Error(`The model endpoint answered ${response.status}: ${text.slice(0, 500)}`);
+        const message = `The model endpoint answered ${response.status}: ${text.slice(0, 500)}`;
+        throw retryable ? new ModelBusy(message) : new ModelRefusedRequest(message);
       }
       await this.sleep(retrySeconds(response, text) * 1000);
     }

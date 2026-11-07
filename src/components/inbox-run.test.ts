@@ -15,7 +15,7 @@ const plan = {
   ],
 };
 
-const SPEND_LIMIT = "The model’s spending limit is reached, so runs are paused. Ask an admin to raise it.";
+const SPEND_LIMIT = "The model’s limit is used up for now, so runs are paused. A free key’s daily quota comes back on its own; a paid key needs its spend limit raised.";
 
 function driver(results: Record<string, InboxRunStepResult>, stopAfter?: string) {
   const asked: string[] = [];

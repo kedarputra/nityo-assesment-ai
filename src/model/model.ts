@@ -101,3 +101,17 @@ export class SpendLimitReached extends Error {
     super("The model's spending limit is reached.");
   }
 }
+
+// Why a model call failed, named so the Agent run record and the desk can say it in words
+// (the error's name becomes the run's error class). The provider's message stays in the logs.
+export class ModelBusy extends Error {
+  override name = "model-busy";
+}
+
+export class ModelTimedOut extends Error {
+  override name = "model-timeout";
+}
+
+export class ModelRefusedRequest extends Error {
+  override name = "model-refused-request";
+}

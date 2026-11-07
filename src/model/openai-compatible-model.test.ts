@@ -145,10 +145,14 @@ describe("OpenAiCompatibleModel", () => {
   it("gives up after a few retries, and never on a request the endpoint refuses", async () => {
     const busy = stubEndpoint([json({}, 503), json({}, 503), json({}, 503), json({}, 503)]);
     await expect(busy.model.send(request)).rejects.toThrow(/answered 503/);
+    await expect(stubEndpoint([json({}, 503), json({}, 503), json({}, 503), json({}, 503)]).model.send(request)).rejects.toMatchObject({
+      name: "model-busy",
+    });
     expect(busy.sent).toHaveLength(4);
 
     const refused = stubEndpoint([json({ error: { message: "bad tool schema" } }, 400)]);
     await expect(refused.model.send(request)).rejects.toThrow(/answered 400: .*bad tool schema/);
+    await expect(stubEndpoint([json({}, 400)]).model.send(request)).rejects.toMatchObject({ name: "model-refused-request" });
     expect(refused.sent).toHaveLength(1);
   });
 });
@@ -177,6 +181,7 @@ describe("OpenAiCompatibleModel, speed", () => {
     const model = new OpenAiCompatibleModel({ baseUrl: "https://m.example", apiKey: "k", modelId: "g", timeoutMs: 20, fetch: neverAnswers });
 
     await expect(model.send(request)).rejects.toThrow("The model didn’t answer within 0 s.");
+    await expect(model.send(request)).rejects.toMatchObject({ name: "model-timeout" });
   });
 });
 
