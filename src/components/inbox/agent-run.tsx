@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import type { InboxStatus } from "@/server/inbox/inbox";
 import { runAgentAction } from "@/server/inbox/actions";
+import { useInboxRun } from "@/components/inbox-run";
 import { StatusPill } from "./status-pill";
 
 // Which emails this browser has asked the agent to read, so the row shows "Reading…" from the
@@ -59,7 +60,9 @@ function withoutKey(map: ReadonlyMap<string, string>, key: string): ReadonlyMap<
 
 export function RowStatus({ emailId, status }: { emailId: string; status: InboxStatus }) {
   const runs = useContext(AgentRunsContext);
-  return <StatusPill status={runs?.reading.has(emailId) ? "reading" : status} />;
+  const inboxRun = useInboxRun();
+  const reading = runs?.reading.has(emailId) || inboxRun?.reading?.emailId === emailId;
+  return <StatusPill status={reading ? "reading" : status} />;
 }
 
 // A secondary button (DESIGN.md, "Buttons"): busy, it keeps its label and shows a spinner.

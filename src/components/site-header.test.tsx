@@ -1,8 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InboxRunProvider } from "./inbox-run";
 import { SiteHeader, SkipLink } from "./site-header";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/server/inbox/actions", () => ({}));
 
 describe("SiteHeader", () => {
   it("shows the wordmark: Harbor Point, then Order desk", () => {
@@ -30,6 +32,51 @@ describe("SiteHeader", () => {
 
     expect(html).toContain("ops.reviewer");
     expect(html).toMatch(/<form[^>]*>.*<button type="submit"[^>]*>Sign out<\/button><\/form>/);
+  });
+});
+
+describe("SiteHeader, the account menu", () => {
+  beforeEach(() => vi.stubEnv("ANTHROPIC_API_KEY", "test-key-never-sent"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  function renderFor(role: "reviewer" | "admin", runGoing = false): string {
+    return renderToStaticMarkup(
+      <InboxRunProvider>
+        <SiteHeader user={{ id: 1, username: `ops.${role}`, role }} runGoing={runGoing} />
+      </InboxRunProvider>,
+    );
+  }
+
+  it("offers an admin Run all and Reset to 07:00, in the menu under their name", () => {
+    const html = renderFor("admin");
+
+    expect(html).toMatch(/<details class="account"><summary class="who"[^>]*>.*ops.admin.*Admin.*<\/summary>/);
+    expect(html).toContain(">Run all</button>");
+    expect(html).toContain(">Reset to 07:00…</button>");
+  });
+
+  it("offers an admin Stop while a run holds the lock", () => {
+    const html = renderFor("admin", true);
+
+    expect(html).toContain(">Stop the run</button>");
+    expect(html).not.toContain(">Run all</button>");
+  });
+
+  it("says why Run all is missing while the agent is switched off", () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const html = renderFor("admin");
+
+    expect(html).not.toContain(">Run all</button>");
+    expect(html).toContain("Run all is off while the agent is switched off.");
+    expect(html).toContain(">Reset to 07:00…</button>");
+  });
+
+    it("offers a reviewer neither", () => {
+    const html = renderFor("reviewer");
+
+    expect(html).not.toContain("Run all");
+    expect(html).not.toContain("Reset to 07:00");
+    expect(html).toContain("Sign out");
   });
 });
 

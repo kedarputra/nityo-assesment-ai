@@ -106,7 +106,7 @@ a local run. None is committed.
 | Variable | Read by | Production | Preview |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | the app | Neon `main`, pooled, as `harbor_point_web` (above) | Neon `preview`, pooled, as `harbor_point_web` |
-| `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset` | Neon `main`, direct (injected) | Neon `preview`, direct |
+| `DATABASE_URL_UNPOOLED` | `db:prepare`, `db:migrate`, `db:reset`, the in-app Reset | Neon `main`, direct (injected) | Neon `preview`, direct |
 | `ANTHROPIC_API_KEY` | the agent | key from `harbor-point-production`, or unset (below) | key from `harbor-point-preview`, or unset |
 | `ANTHROPIC_MODEL` | the agent | optional; `claude-opus-5-5` when unset | same |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
@@ -146,8 +146,11 @@ spent. Setting the key and redeploying turns the agent on
 
 ## Resetting production
 
-The admin's "Reset to 07:00", in the account menu once that screen is built, returns the ERP, the
-inbox and the audit log to the Snapshot from inside the app. From a terminal, with production's
+The admin's "Reset to 07:00", in the header's account menu, returns the ERP, the inbox and the
+audit log to the Snapshot from inside the app, on `DATABASE_URL_UNPOOLED`. It keeps the users,
+their sessions and the rate-limit counts, so everyone stays signed in, and the new audit log starts
+with "reset by <user>". It is refused while a run holds the lock ("A run is in progress. Stop it
+first."), and an admin may reset 3 times an hour. From a terminal, with production's
 `DATABASE_URL`, `DATABASE_URL_UNPOOLED` and `SEED_*` values (from the Neon console and wherever the
 passwords are kept) in a gitignored file such as `.env.production.local`:
 

@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import type { ReactNode } from "react";
+import { InboxRunProvider } from "@/components/inbox-run";
 import { MAIN_CONTENT_ID, SiteHeader, SkipLink } from "@/components/site-header";
+import { getDatabase } from "@/db/client";
 import { getCurrentUser } from "@/server/auth/current-user";
+import { isAnyRunGoing } from "@/server/inbox/inbox-run";
 import "./globals.css";
 
 const sans = Plus_Jakarta_Sans({
@@ -34,17 +37,25 @@ export const viewport: Viewport = {
   ],
 };
 
+// The admin's Run all and Reset are server actions posted from the header on any page, and one
+// email's Agent run can take most of the 300 s a function is allowed (ADR 0003).
+export const maxDuration = 300;
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
+  // Only an admin's menu offers Stop.
+  const runGoing = user?.role === "admin" ? await isAnyRunGoing(getDatabase(), new Date()) : false;
 
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <SkipLink />
-        <SiteHeader user={user} />
-        <main id={MAIN_CONTENT_ID} className="page">
-          {children}
-        </main>
+        <InboxRunProvider>
+          <SiteHeader user={user} runGoing={runGoing} />
+          <main id={MAIN_CONTENT_ID} className="page">
+            {children}
+          </main>
+        </InboxRunProvider>
       </body>
     </html>
   );

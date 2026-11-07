@@ -105,6 +105,14 @@ function what(event: AuditEntry): string {
       return `Undid the release of ${String(event.detail.soNumber)}`;
     case "reply.ready":
       return "Marked the reply ready";
+    case "proposal.superseded":
+      return "Withdrew an undecided Proposal from an earlier run";
+    case "inbox_run.started":
+      return "Started Run all";
+    case "inbox_run.ended":
+      return `Run all ended: ${String(event.detail.reason)}`;
+    case "snapshot.reset":
+      return `Reset to 07:00 by ${String(event.detail.by)}`;
     default:
       return event.action;
   }

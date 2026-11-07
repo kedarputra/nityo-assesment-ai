@@ -420,8 +420,50 @@ describe("InboxDesk, the Proposal pane after a run", () => {
 
     const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
 
-    expect(html).toContain("The agent didn’t finish this email");
+    expect(html).toContain("The agent timed out on this email");
+    expect(html).toContain("Run it again");
     expect(html).toContain("call-cap");
+    expect(html).toContain(">Run the agent</button>");
+  });
+
+  it("says a run that broke did not finish, and offers to run it again", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "no-outcome", requestKinds: [] },
+      proposals: [],
+      routed: [],
+      noAction: null,
+      flags: [],
+      draftReply: null,
+      notes: [],
+      context: [],
+      related: [],
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The agent didn’t finish this email");
+    expect(html).toContain(">Run the agent</button>");
+  });
+
+  it("shows the calm spend-limit words when the model's limit stopped the run", () => {
+    const failed: InboxEmailWithBody = { ...maria, status: "failed" };
+    const work: EmailWork = {
+      run: { runId: "run-1", finished: true, outcome: "failed", errorClass: "spend-limit", requestKinds: [] },
+      proposals: [],
+      routed: [],
+      noAction: null,
+      flags: [],
+      draftReply: null,
+      notes: [],
+      context: [],
+      related: [],
+    };
+
+    const html = renderDesk({ query: { emailId: "E001" }, selected: failed, work });
+
+    expect(html).toContain("The model’s spending limit is reached, so runs are paused");
+    expect(html).toContain("Ask an admin to raise the limit");
   });
 
   it("shows Reading… while a run is under way", () => {

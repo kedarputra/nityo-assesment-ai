@@ -1,7 +1,13 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
-import { AnthropicModel, DEFAULT_MODEL_ID, modelIdFromEnv, type MessagesClient } from "./anthropic-model";
-import type { ModelRequest } from "./model";
+import {
+  AnthropicModel,
+  DEFAULT_MODEL_ID,
+  modelIdFromEnv,
+  withoutSpendLimitRetries,
+  type MessagesClient,
+} from "./anthropic-model";
+import { SpendLimitReached, type ModelRequest } from "./model";
 
 // A stand-in for the SDK client: it records the parameters and answers with a canned message,
 // so no test reaches the network.
@@ -149,5 +155,48 @@ describe("AnthropicModel", () => {
     const model = new AnthropicModel({ client, modelId: "claude-opus-5-5" });
 
     await expect(model.send(request)).rejects.toThrow(/server_tool_use/);
+  });
+});
+
+describe("a spend limit", () => {
+  function failingClient(error: Error): MessagesClient {
+    return { messages: { create: async () => Promise.reject(error) } };
+  }
+
+  const spendLimit429 = { type: "error", error: { type: "rate_limit_error", message: "enforced_spend_limit_reached" } };
+  const usageLimits400 = {
+    type: "error",
+    error: { type: "invalid_request_error", message: "You have reached your specified workspace API usage limits." },
+  };
+
+  it.each([
+    ["429 enforced_spend_limit_reached", 429, spendLimit429],
+    ["400 usage limits", 400, usageLimits400],
+  ] as const)("turns a %s into SpendLimitReached", async (_name, status, body) => {
+    const error = Anthropic.APIError.generate(status, body, undefined, new Headers());
+    const model = new AnthropicModel({ client: failingClient(error), modelId: "claude-opus-5-5" });
+
+    await expect(model.send(request)).rejects.toBeInstanceOf(SpendLimitReached);
+  });
+
+  it("leaves any other error as it is", async () => {
+    const body = { type: "error", error: { type: "invalid_request_error", message: "messages: too long" } };
+    const error = Anthropic.APIError.generate(400, body, undefined, new Headers());
+    const model = new AnthropicModel({ client: failingClient(error), modelId: "claude-opus-5-5" });
+
+    await expect(model.send(request)).rejects.toBe(error);
+  });
+
+  it("marks a spend-limit 429 not to be retried, and leaves other 429s retryable", async () => {
+    const answer = (body: unknown) => async () =>
+      new Response(JSON.stringify(body), { status: 429, headers: { "content-type": "application/json" } });
+    const busy = { type: "error", error: { type: "rate_limit_error", message: "Too many requests" } };
+
+    const capped = await withoutSpendLimitRetries(answer(spendLimit429))("https://api.anthropic.com/v1/messages");
+    const throttled = await withoutSpendLimitRetries(answer(busy))("https://api.anthropic.com/v1/messages");
+
+    expect(capped.headers.get("x-should-retry")).toBe("false");
+    expect(await capped.json()).toEqual(spendLimit429);
+    expect(throttled.headers.get("x-should-retry")).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
   inboxFilters,
   isHandled,
 } from "@/server/inbox/inbox";
+import { InboxRunProgress } from "@/components/inbox-run";
 import { AgentRunsProvider, RowStatus } from "./agent-run";
 import { Avatar } from "./avatar";
 import { ProposalPane } from "./proposal-pane";
@@ -132,6 +133,7 @@ function GreetingCard({ emails, agentOn }: { emails: InboxEmail[]; agentOn: bool
         {handled} of {total} handled
         <span className="hide-tablet"> · Press <kbd>?</kbd> for keyboard keys</span>
       </p>
+      <InboxRunProgress />
     </div>
   );
 }
