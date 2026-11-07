@@ -18,7 +18,7 @@ import { BusinessRuleError, checkOrderEdit, creditCheck, type OrderEdit } from "
 import { recordAudit } from "./audit";
 import { skuCodesIn } from "./product-search";
 import { normaliseAddress } from "./sender";
-import { changeChecks, type ChangeCheck } from "./release-checks";
+import { changeChecks, flagWords, type ChangeCheck } from "./release-checks";
 import {
   citedSearches,
   lockReleases,
@@ -339,7 +339,7 @@ export async function checkChange(tx: Database, change: ChangeToCheck): Promise<
     "no-flags":
       flags.length === 0
         ? { passes: true, detail: "The agent raised no flags." }
-        : { passes: false, detail: `The agent raised: ${flags.map((flag) => flag.code).join(", ")}.` },
+        : { passes: false, detail: `The agent raised: ${flagWords(flags.map((flag) => flag.code))}.` },
   };
   return { lines, totalCents, checks: changeChecks.map((check) => ({ check, ...results[check] })) };
 }

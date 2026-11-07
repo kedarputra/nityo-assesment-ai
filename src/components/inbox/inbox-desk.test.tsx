@@ -648,6 +648,21 @@ describe("InboxDesk, reviewing a Proposal", () => {
     expect(html).toContain("Bluefin Bistro Group can’t get this order yet ($672.00)");
   });
 
+  it("asks for no note beside a locked rule, and titles a raised flag as one (E006)", () => {
+    const html = withProposal({
+      checks: allChecksPass.map((check) =>
+        check.check === "credit-limit" || check.check === "no-flags"
+          ? { ...check, passes: false, detail: check.check === "no-flags" ? "The agent raised: credit limit exceeded." : "Over the limit." }
+          : check,
+      ),
+    });
+
+    expect(html).toContain("Can’t be overridden. Accounts needs to clear this first.");
+    expect(html).not.toContain("Add a quick note about why it’s OK…");
+    expect(html).toContain("<b>The agent raised a flag.</b> The agent raised: credit limit exceeded.");
+    expect(html).not.toContain("<b>Nothing flagged.</b>");
+  });
+
   it("lets quantities, products, lines and the ship-to change, but never the price", () => {
     const html = withProposal({
       checks: failing(["no-flags"]),

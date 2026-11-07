@@ -53,3 +53,8 @@ const HARD_RULES: ReadonlySet<string> = new Set<ProposalCheck>([
 export function isHardRule(check: string): boolean {
   return HARD_RULES.has(check);
 }
+
+// A flag's code in words for the desk: "credit-limit-exceeded" reads "credit limit exceeded".
+export function flagWords(codes: readonly string[]): string {
+  return codes.map((code) => code.replaceAll(/[-_]+/g, " ")).join(", ");
+}

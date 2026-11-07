@@ -26,6 +26,17 @@ export function checkName(check: string): string {
   return check in CHECK_NAMES ? CHECK_NAMES[check as ProposalCheck] : check;
 }
 
+// A failing check is titled by what went wrong where its name alone would read as the opposite:
+// "Nothing flagged." above "The agent raised: …" says one thing and means another.
+const FAILING_NAMES: Partial<Record<ProposalCheck, string>> = {
+  "no-flags": "The agent raised a flag",
+};
+
+export function checkTitle(check: Pick<RecordedCheck, "check" | "passes">): string {
+  if (!check.passes && check.check in FAILING_NAMES) return FAILING_NAMES[check.check as ProposalCheck] ?? checkName(check.check);
+  return checkName(check.check);
+}
+
 // Why a hard rule cannot be overridden, and what clears it (DESIGN.md: "Can't be overridden.").
 export function lockedBecause(check: string): string {
   switch (check) {
@@ -60,7 +71,7 @@ export function CheckList({
           <span aria-hidden="true">{checkIcon(check)}</span>
           <span className="check-body">
             <span>
-              <b>{checkName(check.check)}.</b> {check.detail}
+              <b>{checkTitle(check)}.</b> {check.detail}
               {check.choices && check.choices.length > 0 ? ` Choices: ${check.choices.join("; ")}.` : null}
             </span>
             {extra?.(check)}

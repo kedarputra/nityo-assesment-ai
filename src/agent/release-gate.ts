@@ -26,7 +26,7 @@ import { resolveRequestedDate } from "@/rules/requested-date";
 import { shortStock, type ShortStock, type ShortStockChoice } from "@/rules/short-stock";
 import { recordAudit } from "./audit";
 import { sellingUnitFits, skuCodesIn } from "./product-search";
-import { releaseChecks, type ReleaseCheck } from "./release-checks";
+import { flagWords, releaseChecks, type ReleaseCheck } from "./release-checks";
 import { normaliseAddress } from "./sender";
 import { ToolError } from "./tool-error";
 
@@ -549,7 +549,7 @@ function evaluate(facts: GateFacts): RecordedCheck[] {
     "no-flags":
       facts.flagCodes.length === 0
         ? { passes: true, detail: "The agent raised no flags." }
-        : { passes: false, detail: `The agent raised: ${facts.flagCodes.join(", ")}.` },
+        : { passes: false, detail: `The agent raised: ${flagWords(facts.flagCodes)}.` },
   };
   return releaseChecks.map((check) => ({ check, ...results[check] }));
 }
