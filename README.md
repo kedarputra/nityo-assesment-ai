@@ -5,13 +5,14 @@ operations team approving anything risky. Built for the AI Engineer assessment
 ([the brief](docs/brief/assessment.md)) on the
 [data pack](data/harbor_point_data_pack/README.md) as delivered.
 
-> **Status: in progress.** The data pack loads, sign-in works and the deploy is configured; the
-> agent and the review desk fill in ticket by ticket under `grilled/`.
+> **Status:** every ticket under `grilled/hp-1-order-intake/tickets/` is built and merged. The agent
+> runs when a model key is set (Anthropic, or Gemini's free tier; see
+> [`docs/deployment.md`](docs/deployment.md)); without one, the desk works with the agent switched off.
 
 ## Live
 
-- **URL:** *to fill in once the Vercel project is connected* (`grilled/hp-1-order-intake`, ticket 17).
-- **Assessor login:** username *to fill in*; the password is sent separately, never committed.
+- **URL:** https://nityo-assesment-ai.vercel.app (production, deployed by Vercel on every push to `main`).
+- **Assessor login:** username `assessor`; the password is sent separately, never committed.
 
 ## Run it locally
 
@@ -31,7 +32,7 @@ Postgres, runs only the tests, which need no server at all (`make check`).
    `DATABASE_URL=postgres://postgres:postgres@localhost:5432/harbor_point`, the three passwords
    (`SEED_REVIEWER_PASSWORD`, `SEED_ADMIN_PASSWORD`, `SEED_ASSESSOR_PASSWORD`, 12 characters or
    more) and `SEED_ASSESSOR_USERNAME`. Leave `DATABASE_URL_UNPOOLED` empty: a local Postgres has
-   no pooler. `ANTHROPIC_API_KEY` is needed only to run the agent.
+   no pooler. `ANTHROPIC_API_KEY`, or the free `GEMINI_API_KEY`, is needed only to run the agent.
 4. **Migrate and seed**, exactly as a deploy does: `set -a && . ./.env.local && set +a`, then
    `npm run db:prepare`. It loads the Snapshot (the data pack at 07:00) and the logins into the
    empty database; run again, it only migrates.
