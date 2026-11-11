@@ -12,7 +12,7 @@ export interface ToolCallEntry {
 }
 
 export interface ErrorEntry {
-  event: "run_failed" | "health_check_failed" | "inbox_run_step_failed" | "background_run_failed";
+  event: "run_failed" | "health_check_failed" | "inbox_run_step_failed" | "background_run_failed" | "search_failed" | "schedule_tick_failed";
   runId?: string;
   emailId?: string;
   // A class name from `errorClassOf`, or one of the run's own words such as "call-cap".
