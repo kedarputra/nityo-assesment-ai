@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  Bot,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -190,7 +191,11 @@ export function ReadingWorkspace({
           {message}
           {composing ? <ReplyComposer key={`${emailId}-${reply.updatedAt?.toISOString() ?? reply.state}`} reply={reply} onClose={() => setComposing(false)} /> : null}
         </div>
-        <aside className="reading-agent" aria-label="What the agent did">
+        <aside className="reading-agent" aria-labelledby="agent-head">
+          <h2 id="agent-head" className="agent-head">
+            <Bot size={18} aria-hidden="true" />
+            What the agent did
+          </h2>
           {agentPanel}
         </aside>
       </div>

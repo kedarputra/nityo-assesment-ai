@@ -1,4 +1,4 @@
-import { CircleCheck, Flag } from "lucide-react";
+import { Building2, CircleCheck, Flag } from "lucide-react";
 import { formatBusinessDay, formatBusinessTime } from "@/lib/business-clock";
 import type { AgentPresence } from "@/server/desk/presence";
 import type { ReplyView } from "@/server/desk/replies";
@@ -9,6 +9,7 @@ import { AgentRunsProvider } from "../inbox/agent-run";
 import { Avatar } from "../inbox/avatar";
 import { ProposalPane } from "../inbox/proposal-pane";
 import { ReviewDeskProvider } from "../inbox/review-desk";
+import { ResizeHandle } from "../shell/resize-handle";
 import { StatusPill } from "../inbox/status-pill";
 import {
   FLAG_NAMES,
@@ -75,6 +76,7 @@ export function MailView({ folder, view, emails, labels, selected, work, reply, 
               agentOn={agentOn}
             />
           </div>
+          <ResizeHandle cssVar="--list" measure=".mail-list-pane" min={300} max={720} label="Resize the email list" className="resize-handle--list" />
           <section className="reading-pane" aria-label="Reading pane">
             {selected && desk && reply ? (
               <ReadingWorkspace
@@ -136,15 +138,13 @@ function EmailMessage({ email, desk, labels }: { email: InboxEmailWithBody; desk
           <p className="message-from">
             <b>{email.fromName}</b> <span className="meta">&lt;{email.fromEmail}&gt;</span>
           </p>
-          <p className="meta">
-            To orders@harborpointsupply.example
-            {desk.customerName ? (
-              <>
-                {" "}
-                · <span className="message-customer">{desk.customerName}</span>
-              </>
-            ) : null}
-          </p>
+          <p className="meta message-to">To orders@harborpointsupply.example</p>
+          {desk.customerName ? (
+            <p className="message-customer-line">
+              <Building2 size={14} aria-hidden="true" />
+              {desk.customerName}
+            </p>
+          ) : null}
         </div>
         <p className="message-time meta">
           <time dateTime={email.receivedAt.toISOString()}>
