@@ -13,6 +13,7 @@ import {
   INBOX_RUN_ENDED,
   InboxRunRefused,
   RUN_ALL_ALREADY_GOING,
+  SELECTED_RUN_ALREADY_GOING,
   STEP_GRACE_MS,
   finishInboxRun,
   isInboxRunToken,
@@ -268,6 +269,66 @@ describe("Run all in the background (ADR 0004)", () => {
     await runChainStep(db, chain, deps().deps);
     expect(await findInboxEmail(db, "E002")).toMatchObject({ status: "no_action" });
     expect(await nextEmailOf(db, chain.inboxRunId)).toBe("E003");
+  });
+
+  it("reads only the selected emails on a run over selected emails (ADR 0005), then finishes", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin, emailIds: ["E007", "E003"] });
+
+    const [stored] = await db.select().from(inboxRuns).where(eq(inboxRuns.id, chain.inboxRunId));
+    expect(stored).toMatchObject({ emailIds: ["E007", "E003"], trigger: "person" });
+    expect(await nextEmailOf(db, chain.inboxRunId)).toBe("E003");
+    expect(await runChainStep(db, chain, deps().deps)).toBe("read");
+    expect(await runChainStep(db, chain, deps().deps)).toBe("read");
+    expect(await runChainStep(db, chain, deps().deps)).toBe("finished");
+
+    const read = await db.select({ emailId: agentRuns.emailId }).from(agentRuns).orderBy(asc(agentRuns.startedAt), asc(agentRuns.emailId));
+    expect(read.map((run) => run.emailId).sort()).toEqual(["E003", "E007"]);
+    expect(await findInboxEmail(db, "E001")).toMatchObject({ status: "not_run" });
+    const [started] = await db.select().from(auditEvents).where(eq(auditEvents.action, "inbox_run.started"));
+    expect(started).toMatchObject({ actor: "person", detail: { inboxRunId: chain.inboxRunId, emailIds: ["E007", "E003"] } });
+  });
+
+  it("plans only the selected emails that are left to read", async () => {
+    const first = await startInboxRun(db, { userId: adminId, at: start });
+    await runInboxRunStep(db, closesAsSpam(), { inboxRunId: first.inboxRunId, emailId: "E001", userId: adminId, modelId: MODEL_ID, now: () => start });
+    const later = new Date(start.getTime() + STEP_GRACE_MS + 1_000);
+
+    const plan = await startInboxRun(db, { userId: adminId, at: later, emailIds: ["E002", "E001"] });
+
+    expect(plan.emails).toEqual([{ emailId: "E002", position: 2 }]);
+  });
+
+  it("refuses a second run while a run over selected emails is going, in its own words", async () => {
+    await startInboxRun(db, { userId: adminId, at: start, emailIds: ["E002"] });
+
+    await expect(startInboxRun(db, { userId: adminId, at: new Date(start.getTime() + 1_000) })).rejects.toThrow(
+      new InboxRunRefused(SELECTED_RUN_ALREADY_GOING),
+    );
+  });
+
+  it("starts nothing when the admission refuses, inside the same transaction", async () => {
+    await expect(
+      startInboxRun(db, {
+        userId: adminId,
+        at: start,
+        emailIds: ["E002"],
+        admit: async () => {
+          throw new RateLimited("limit");
+        },
+      }),
+    ).rejects.toBeInstanceOf(RateLimited);
+
+    expect(await db.$count(inboxRuns)).toBe(0);
+    expect(await db.$count(auditEvents)).toBe(0);
+  });
+
+  it("records a run the schedule started as the agent's, in the admin's name", async () => {
+    const chain = await startBackgroundInboxRun(db, { userId: adminId, at: start, origin, trigger: "schedule" });
+
+    const [stored] = await db.select().from(inboxRuns).where(eq(inboxRuns.id, chain.inboxRunId));
+    expect(stored).toMatchObject({ emailIds: null, trigger: "schedule", startedBy: adminId });
+    const [started] = await db.select().from(auditEvents).where(eq(auditEvents.action, "inbox_run.started"));
+    expect(started).toMatchObject({ actor: "agent", userId: adminId, detail: { inboxRunId: chain.inboxRunId, trigger: "schedule" } });
   });
 
   it("finishes the run when no email is left, and asks for nothing more", async () => {

@@ -4,9 +4,18 @@ import type { SessionUser } from "./sessions";
 export const SESSION_COOKIE = "hp_session";
 export const SIGN_IN_PATH = "/sign-in";
 
+// The schedule's tick (ADR 0005), posted by a GitHub Actions workflow rather than a browser.
+export const AGENT_TICK_PATH = "/api/agent/tick";
+
 // The only paths open without a session (security 7). The Run all step carries its run's own
-// secret instead, checked by the route (ADR 0004).
-const PUBLIC_PATHS = new Set([SIGN_IN_PATH, "/api/health", "/api/inbox-run/step"]);
+// secret instead, checked by the route (ADR 0004); so does the schedule's tick, whose
+// `Authorization: Bearer <CRON_SECRET>` the route checks (ADR 0005).
+const PUBLIC_PATHS = new Set([SIGN_IN_PATH, "/api/health", "/api/inbox-run/step", AGENT_TICK_PATH]);
+// Paths exempt from the same-origin check: the caller is a server, which sends no Origin, and
+// proves itself with a bearer secret instead of a cookie. A cross-site page cannot forge one: it
+// has no secret, its browser would attach no credential, and a custom Authorization header from
+// another origin needs a CORS preflight the app never grants.
+const BEARER_PATHS = new Set([AGENT_TICK_PATH]);
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export type FindSessionUser = (token: string) => Promise<SessionUser | null>;
@@ -21,11 +30,11 @@ export async function gateRequest(
   forwardedHeaders?: Headers,
 ): Promise<NextResponse> {
   const isStateChanging = !SAFE_METHODS.has(request.method);
-  if (isStateChanging && !isSameOrigin(request)) {
+  const { pathname, search } = request.nextUrl;
+  if (isStateChanging && !BEARER_PATHS.has(pathname) && !isSameOrigin(request)) {
     return NextResponse.json({ error: "This request came from another site, so it was refused." }, { status: 403 });
   }
 
-  const { pathname, search } = request.nextUrl;
   const passThrough = () => NextResponse.next(forwardedHeaders ? { request: { headers: forwardedHeaders } } : undefined);
   if (PUBLIC_PATHS.has(pathname)) return passThrough();
 

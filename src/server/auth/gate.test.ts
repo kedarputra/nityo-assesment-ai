@@ -96,6 +96,22 @@ describe("gateRequest", () => {
     expect((await gateRequest(crossSite, findSessionUser)).status).toBe(403);
   });
 
+  it("lets the schedule's tick through without a session or an Origin, its bearer secret being the check (ADR 0005)", async () => {
+    const lookup = vi.fn(findSessionUser);
+    // GitHub Actions' curl sends no Origin header and no cookie.
+    const fromCron = request("/api/agent/tick", { method: "POST" });
+    fromCron.headers.set("authorization", "Bearer some-secret");
+
+    expect(passesThrough(await gateRequest(fromCron, lookup))).toBe(true);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("exempts only the tick from the same-origin check, not paths that start like it", async () => {
+    expect((await gateRequest(request("/api/agent/tick/more", { method: "POST" }), findSessionUser)).status).toBe(403);
+    expect((await gateRequest(request("/api/agent", { method: "POST", token: VALID_TOKEN }), findSessionUser)).status).toBe(403);
+    expect((await gateRequest(request("/api/inbox-run/step", { method: "POST" }), findSessionUser)).status).toBe(403);
+  });
+
   it("does not open paths that merely start like a public one", async () => {
     const response = await gateRequest(request("/api/health/details"), findSessionUser);
 

@@ -112,6 +112,8 @@ a local run. None is committed.
 | `GEMINI_API_KEY` | the agent, when `ANTHROPIC_API_KEY` is unset | free key from Google AI Studio, or unset | same, or unset |
 | `GEMINI_MODEL` | the agent | optional; `gemini-3.8-flash` when unset | same |
 | `GEMINI_REASONING_EFFORT` | the agent | optional; `low` when unset | same |
+| `GEMINI_EMBEDDING_MODEL` | search by meaning, on `GEMINI_API_KEY` | optional; `gemini-embedding-001` when unset | same |
+| `CRON_SECRET` | `/api/agent/tick`, the schedule's tick | a long random value (`openssl rand -hex 32`), the same as the GitHub secret | its own value, or unset |
 | `SEED_REVIEWER_PASSWORD` | the user seed | `ops.reviewer`'s password, 12+ characters | its own value |
 | `SEED_ADMIN_PASSWORD` | the user seed | `admin`'s password, 12+ characters | its own value |
 | `SEED_ASSESSOR_USERNAME` | the user seed | the assessors' username | same or its own |
@@ -157,6 +159,32 @@ audit log) with the agent switched off: the Proposal pane says so in place of "R
 the run action refuses before it writes anything, so no failed Agent runs pile up and nothing is
 spent. Setting the key and redeploying turns the agent on
 ([`src/model/agent-switch.ts`](../src/model/agent-switch.ts)).
+
+## The schedule
+
+An admin can switch on an automatic run of the agent every 5, 10, 15, 30 or 60 minutes
+([ADR 0005](adr/0005-outlook-style-desk.md)). Vercel Hobby crons run once a day, so the clock is a
+GitHub Actions workflow instead, [`.github/workflows/agent-tick.yml`](../.github/workflows/agent-tick.yml):
+every 5 minutes it posts to `/api/agent/tick` with `Authorization: Bearer <CRON_SECRET>`. The route
+compares the secret in constant time (401 when it is wrong, 503 when the deploy has no
+`CRON_SECRET`), and starts a background Run all ([ADR 0004](adr/0004-server-driven-background-runs.md))
+in the admin's name when the schedule is on, its interval has passed, nothing is running, the
+agent has a key and an email is waiting. The route is open without a session and exempt from the
+gate's same-origin check: a server sends no `Origin`, and the bearer secret is the check.
+
+To set it up, an admin adds:
+
+1. in GitHub, Settings > Secrets and variables > Actions, two **repository secrets**: `APP_URL`,
+   the live URL without a trailing slash, and `CRON_SECRET`, a long random value;
+2. in Vercel, `CRON_SECRET` for Production with the same value, then redeploys.
+
+Until both GitHub secrets exist the workflow logs a notice and succeeds without calling anything.
+GitHub may run a scheduled workflow late, or skip one under load, so a 5-minute interval is a
+target, not a promise; a tick up to a minute early still counts as due.
+
+**Search by meaning** embeds the 40 emails once with `GEMINI_EMBEDDING_MODEL` on `GEMINI_API_KEY`,
+stores the vectors in `email_embeddings` with the model's name, and embeds each query. Without the
+key, or when the embedding call fails, search falls back to keywords and says so.
 
 ## Resetting production
 
