@@ -24,6 +24,8 @@ export class InboxRunRefused extends Error {
 }
 
 export const RUN_ALL_ALREADY_GOING = "Run all is already going. Let it finish, or stop it first.";
+// The same refusal while the agent works through emails a person selected (ADR 0005).
+export const SELECTED_RUN_ALREADY_GOING = "The agent is already reading the selected emails. Let it finish, or stop it first.";
 export const INBOX_RUN_ENDED = "This Run all has stopped. Press Run all to carry on from where it got to.";
 // DESIGN.md, "Voice and words": the calm words for a spend limit.
 export const SPEND_LIMIT_MESSAGE = "The model’s limit is used up for now, so runs are paused. A free key’s daily quota comes back on its own; a paid key needs its spend limit raised.";
@@ -91,30 +93,55 @@ async function endInboxRun(
   });
 }
 
-// Starts an Inbox run over every unprocessed email, so pressing Run all again after a closed tab
-// carries on from the first one left. A second Inbox run is refused while one is working; one whose
-// tab has gone quiet is ended as abandoned and replaced.
-export async function startInboxRun(db: Database, start: { userId: number; at: Date }): Promise<InboxRunPlan> {
+export type InboxRunTrigger = InboxRunRow["trigger"];
+
+export interface InboxRunStart {
+  userId: number;
+  at: Date;
+  // Only these emails, when a person selected them (ADR 0005); every email left when absent.
+  emailIds?: string[];
+  // A person (Run all, or selected emails) or the schedule, which starts it in an admin's name.
+  trigger?: InboxRunTrigger;
+  // Runs in the transaction that starts the Inbox run, after the lock: a refusal here (such as a
+  // rate limit) starts nothing and counts nothing.
+  admit?: (tx: Database) => Promise<void>;
+}
+
+// Starts an Inbox run over every unprocessed email (or every unprocessed one of those selected),
+// so pressing Run all again after a closed tab carries on from the first one left. A second Inbox
+// run is refused while one is working; one whose tab has gone quiet is ended as abandoned and
+// replaced.
+export async function startInboxRun(db: Database, start: InboxRunStart): Promise<InboxRunPlan> {
+  const emailIds = start.emailIds === undefined ? null : [...new Set(start.emailIds)];
+  const trigger = start.trigger ?? "person";
   const inboxRunId = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${INBOX_RUN_LOCK})`);
     const active = await activeInboxRun(tx);
     if (active) {
-      if (await isBusy(tx, active, start.at)) throw new InboxRunRefused(RUN_ALL_ALREADY_GOING);
+      if (await isBusy(tx, active, start.at)) {
+        throw new InboxRunRefused(active.emailIds === null ? RUN_ALL_ALREADY_GOING : SELECTED_RUN_ALREADY_GOING);
+      }
       await endInboxRun(tx, active, { reason: "abandoned", at: start.at, userId: start.userId });
     }
+    await start.admit?.(tx);
     const [created] = await tx
       .insert(inboxRuns)
-      .values({ startedBy: start.userId, startedAt: start.at, lastStepAt: start.at })
+      .values({ startedBy: start.userId, startedAt: start.at, lastStepAt: start.at, emailIds, trigger })
       .returning({ id: inboxRuns.id });
     if (!created) throw new Error("The Inbox run was not stored.");
     await recordAudit(tx, {
       at: start.at,
-      actor: "person",
+      // The schedule starts a run in the admin's name, but no person pressed anything.
+      actor: trigger === "schedule" ? "agent" : "person",
       userId: start.userId,
       action: "inbox_run.started",
       emailId: null,
       runId: null,
-      detail: { inboxRunId: created.id },
+      detail: {
+        inboxRunId: created.id,
+        ...(emailIds === null ? {} : { emailIds }),
+        ...(trigger === "schedule" ? { trigger } : {}),
+      },
     });
     return created.id;
   });
@@ -124,7 +151,7 @@ export async function startInboxRun(db: Database, start: { userId: number; at: D
     inboxRunId,
     emails: inbox
       .map((email, index) => ({ emailId: email.emailId, position: index + 1, status: email.status }))
-      .filter((email) => isUnprocessed(email.status))
+      .filter((email) => isUnprocessed(email.status) && (emailIds === null || emailIds.includes(email.emailId)))
       .map(({ emailId, position }) => ({ emailId, position })),
     total: inbox.length,
   };
@@ -220,11 +247,8 @@ export async function isInboxRunToken(db: Database, chain: InboxRunChain): Promi
 }
 
 // Starts an Inbox run that the server drives, and gives back its secret for the first step.
-export async function startBackgroundInboxRun(
-  db: Database,
-  start: { userId: number; at: Date; origin: string },
-): Promise<InboxRunChain> {
-  const plan = await startInboxRun(db, { userId: start.userId, at: start.at });
+export async function startBackgroundInboxRun(db: Database, start: InboxRunStart & { origin: string }): Promise<InboxRunChain> {
+  const plan = await startInboxRun(db, start);
   const token = randomBytes(32).toString("hex");
   await db
     .update(inboxRuns)
@@ -233,13 +257,19 @@ export async function startBackgroundInboxRun(
   return { inboxRunId: plan.inboxRunId, token };
 }
 
-// The next email this Inbox run should read: the first, in received_at order, that is not done
-// and that this run has not tried yet (so a failure is not retried in a loop).
+// The next email this Inbox run should read: the first, in received_at order, that is not done,
+// that this run has not tried yet (so a failure is not retried in a loop) and, on a run over
+// selected emails, that was selected.
 export async function nextEmailOf(db: Database, inboxRunId: number): Promise<string | null> {
+  const [inboxRun] = await db.select({ emailIds: inboxRuns.emailIds }).from(inboxRuns).where(eq(inboxRuns.id, inboxRunId));
+  const selected = inboxRun?.emailIds ? new Set(inboxRun.emailIds) : null;
   const tried = await db.select({ emailId: agentRuns.emailId }).from(agentRuns).where(eq(agentRuns.inboxRunId, inboxRunId));
   const triedIds = new Set(tried.map((row) => row.emailId));
   const inbox = await listInboxEmails(db);
-  return inbox.find((email) => isUnprocessed(email.status) && !triedIds.has(email.emailId))?.emailId ?? null;
+  const next = inbox.find(
+    (email) => isUnprocessed(email.status) && !triedIds.has(email.emailId) && (selected === null || selected.has(email.emailId)),
+  );
+  return next?.emailId ?? null;
 }
 
 export interface ChainStepDeps {
