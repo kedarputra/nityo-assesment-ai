@@ -30,7 +30,7 @@ export function ScheduleForm({ enabled, intervalMinutes }: { enabled: boolean; i
         <input type="checkbox" role="switch" checked={on} onChange={(event) => setOn(event.target.checked)} />
         <span>Run the agent automatically</span>
       </label>
-      <label className="field">
+      <label className="schedule-field">
         Every
         <select value={every} onChange={(event) => setEvery(Number(event.target.value))} disabled={!on}>
           {INTERVALS.map((minutes) => (

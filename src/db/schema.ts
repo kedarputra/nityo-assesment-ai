@@ -682,7 +682,8 @@ export const agentSchedule = pgTable(
   ],
 );
 
-// An email's embedding for search by meaning. Kept by a Reset: the emails never change.
+// An email's embedding for search by meaning. A Reset empties it (the emails' truncate cascades
+// here); the next search by meaning rebuilds it in one batch.
 export const emailEmbeddings = pgTable("email_embeddings", {
   emailId: text("email_id")
     .primaryKey()

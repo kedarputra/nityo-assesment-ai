@@ -31,7 +31,7 @@ describe("TopBar", () => {
   it("searches everything from one box, by keyword or by meaning", () => {
     const html = render("reviewer");
 
-    expect(html).toMatch(/<form class="global-search" action="\/search" role="search">/);
+    expect(html).toMatch(/<form class="global-search" role="search" action="\/search">/);
     expect(html).toContain('placeholder="Search emails, customers, products, orders"');
     expect(html).toContain('<option value="meaning">By meaning</option>');
   });

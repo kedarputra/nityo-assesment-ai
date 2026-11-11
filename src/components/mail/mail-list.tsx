@@ -32,6 +32,7 @@ import {
   type DeskLabel,
   type FolderId,
 } from "./folders";
+import { useRemembered } from "../remembered";
 import { LabelChip } from "./label-chip";
 
 const PAGE_SIZE = 20;
@@ -83,12 +84,6 @@ export function MailList({ folder, title, purpose, emails, labels, selectedId, a
   const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState<{ text: string; problem: boolean } | null>(null);
   const [busy, startBusy] = useTransition();
-
-  // A new folder starts on its first page with nothing selected.
-  useEffect(() => {
-    setPage(0);
-    setSelected(new Set());
-  }, [folder]);
 
   const filtered = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -533,30 +528,6 @@ function ToolSelect({
   );
 }
 
-// A choice this browser remembers between visits, such as the sort order.
-function useRemembered<T extends string>(key: string, initial: T): [T, (value: T) => void] {
-  const [value, setValue] = useState<T>(initial);
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(key);
-      if (stored) setValue(stored as T);
-    } catch {
-      // Not remembered; the default stands.
-    }
-  }, [key]);
-  return [
-    value,
-    (next: T) => {
-      setValue(next);
-      try {
-        window.localStorage.setItem(key, next);
-      } catch {
-        // Still applied for this visit.
-      }
-    },
-  ];
-}
-
 const TRIAGE_ORDER: TriageStatus[] = ["new", "in-progress", "waiting", "done"];
 const ATTENTION_ORDER = (email: DeskEmail) => (needsReview(email) ? 0 : email.flag === "follow-up" ? 1 : 2);
 
@@ -571,7 +542,13 @@ export function sortEmails(emails: DeskEmail[], sort: SortKey): DeskEmail[] {
     case "sender":
       return copy.sort((a, b) => a.fromName.localeCompare(b.fromName) || byTime(a, b));
     case "customer":
-      return copy.sort((a, b) => (a.customerName ?? "~").localeCompare(b.customerName ?? "~") || byTime(a, b));
+      // A sender with no customer sorts last.
+      return copy.sort(
+        (a, b) =>
+          Number(a.customerName === null) - Number(b.customerName === null) ||
+          (a.customerName ?? "").localeCompare(b.customerName ?? "") ||
+          byTime(a, b),
+      );
     case "attention":
       return copy.sort((a, b) => ATTENTION_ORDER(a) - ATTENTION_ORDER(b) || byTime(a, b));
   }
@@ -603,10 +580,11 @@ export function groupEmails(emails: DeskEmail[], group: GroupKey, labels: DeskLa
         add(`s-${TRIAGE_ORDER.indexOf(email.triageStatus)}`, TRIAGE_STATUS_NAMES[email.triageStatus], email);
         break;
       case "customer":
-        add(`c-${email.customerName ?? "~unknown"}`, email.customerName ?? "Unknown sender", email);
+        // Keys sort the groups; an unknown sender's group comes last.
+        add(email.customerName ? `c-${email.customerName}` : "z-unknown", email.customerName ?? "Unknown sender", email);
         break;
       case "label":
-        if (email.labelIds.length === 0) add("~none", "No label", email);
+        if (email.labelIds.length === 0) add("z-none", "No label", email);
         for (const id of email.labelIds) add(`l-${id}`, labels.find((label) => label.id === id)?.name ?? "Label", email);
         break;
     }

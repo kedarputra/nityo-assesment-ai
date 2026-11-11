@@ -72,9 +72,9 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                 </span>
                 {hit.snippet ? (
                   <span className="snippet">
-                    …{hit.snippet.before}
+                    {hit.snippet.before}
                     <mark>{hit.snippet.match}</mark>
-                    {hit.snippet.after}…
+                    {hit.snippet.after}
                   </span>
                 ) : null}
                 <span className="result-bottom">

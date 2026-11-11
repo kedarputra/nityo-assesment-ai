@@ -1,7 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import { useRemembered } from "../remembered";
 
 // The shell's own state: the sidebar collapsed to icons on a desk, or opened as a drawer on a
 // phone. A collapsed sidebar is remembered in this browser only.
@@ -17,30 +18,16 @@ const ShellContext = createContext<ShellState | null>(null);
 const COLLAPSED_KEY = "hp.sidebar.collapsed";
 
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [stored, setStored] = useRemembered<"0" | "1">(COLLAPSED_KEY, "0");
+  const collapsed = stored === "1";
+  // The drawer is open on the page it was opened on; going anywhere else closes it.
   const pathname = usePathname();
-
-  useEffect(() => {
-    try {
-      setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
-    } catch {
-      // Storage can be blocked; the sidebar then simply starts open.
-    }
-  }, []);
-
-  // Choosing a page in the drawer takes you there and closes it.
-  useEffect(() => setDrawerOpen(false), [pathname]);
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const drawerOpen = openOn === pathname;
+  const setDrawerOpen = (open: boolean) => setOpenOn(open ? pathname : null);
 
   function toggleCollapsed() {
-    setCollapsed((current) => {
-      try {
-        window.localStorage.setItem(COLLAPSED_KEY, current ? "0" : "1");
-      } catch {
-        // Not remembered; it still toggles.
-      }
-      return !current;
-    });
+    setStored(collapsed ? "0" : "1");
   }
 
   return (

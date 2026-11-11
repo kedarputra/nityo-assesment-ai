@@ -64,6 +64,8 @@ export function MailView({ folder, view, emails, labels, selected, work, reply, 
               canStop={isAdmin}
             />
             <MailList
+              // A new folder starts on its first page with nothing selected.
+              key={folder}
               folder={folder}
               title={folderName(folder, labels)}
               purpose={folderPurpose(folder)}

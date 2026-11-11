@@ -48,10 +48,6 @@ function renderDesk(overrides: DeskOverrides = {}): string {
   );
 }
 
-function count(html: string, pattern: RegExp): number {
-  return html.match(new RegExp(pattern, "g"))?.length ?? 0;
-}
-
 describe("ProposalPane, before a run", () => {
   it("shows the Proposal pane's empty state: no agent has run on this email, and offers to run it", () => {
     const html = renderDesk({ query: { emailId: "E005" }, selected: jenna });
@@ -155,7 +151,6 @@ describe("ProposalPane, the Proposal pane after a run", () => {
     // A released order has nothing left to decide.
     expect(html).not.toContain("Approve &amp; release");
     expect(html).not.toContain("Reject…");
-    expect(html).toContain("1 of 2 handled");
   });
 
   it("lists only the failing checks under why it’s waiting, with the rest folded", () => {

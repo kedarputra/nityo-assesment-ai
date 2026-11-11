@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import Link from "next/link";
 import type { SessionUser } from "@/server/auth/sessions";
 import type { AgentPresence } from "@/server/desk/presence";
 import { AccountMenu } from "../account-menu";
@@ -14,14 +15,14 @@ export function TopBar({ user, presence, query }: { user: SessionUser; presence:
     <header className="topbar">
       <div className="topbar-start">
         <DrawerButton />
-        <a className="brand" href="/" translate="no">
+        <Link className="brand" href="/" translate="no">
           <span className="brand-mark" aria-hidden="true">
             HP
           </span>
           <span className="brand-name">
             Harbor Point <span>Order desk</span>
           </span>
-        </a>
+        </Link>
       </div>
       <form className="global-search" action="/search" role="search">
         <Search aria-hidden="true" size={16} />
