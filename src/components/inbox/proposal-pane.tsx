@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { mailHref } from "../mail/folders";
 import type { NoActionReason, RequestKind, RouteReason } from "@/db/schema";
 import { isHardRule } from "@/agent/release-checks";
 import { isTimedOut, SPEND_LIMIT_ERROR_CLASS } from "@/agent/run-errors";
@@ -50,10 +51,13 @@ export function ProposalPane({
   email,
   work,
   agentOn,
+  showReply = true,
 }: {
   email: InboxEmailWithBody | null;
   work: EmailWork | null;
   agentOn: boolean;
+  // The mail view composes replies in its own Outlook-style composer (ADR 0005).
+  showReply?: boolean;
 }) {
   if (!email) return <NothingToDecide email={null} agentOn={agentOn} />;
   if (!work) return <NothingToDecide email={email} agentOn={agentOn} />;
@@ -83,7 +87,7 @@ export function ProposalPane({
       {work.related.length > 0 ? <Related related={work.related} /> : null}
       {work.context.length > 0 ? <AgentNotes notes={work.context} /> : null}
       {work.notes.length > 0 ? <Notes notes={work.notes} /> : null}
-      {work.draftReply !== null ? <DraftReplyEditor emailId={email.emailId} reply={work.draftReply} /> : null}
+      {showReply && work.draftReply !== null ? <DraftReplyEditor emailId={email.emailId} reply={work.draftReply} /> : null}
     </div>
   );
 }
@@ -176,7 +180,7 @@ function didNotFinishNextStep(errorClass: string | null): string {
 }
 
 function emailHref(emailId: string): string {
-  return `/?${new URLSearchParams({ filter: "all", email: emailId }).toString()}`;
+  return mailHref({ folder: "inbox", emailId, view: "detail" });
 }
 
 function KindTags({ kinds }: { kinds: RequestKind[] }) {

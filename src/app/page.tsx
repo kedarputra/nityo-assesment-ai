@@ -1,55 +1,45 @@
-import { InboxDesk } from "@/components/inbox/inbox-desk";
+import { MailView } from "@/components/mail/mail-view";
+import { parseFolder } from "@/components/mail/folders";
 import { getDatabase } from "@/db/client";
-import { isAgentConfigured } from "@/model/agent-switch";
 import { requireUser } from "@/server/auth/current-user";
+import { loadDeskEmails, loadLabels, loadPresence } from "@/server/desk/load";
+import { findReply } from "@/server/desk/replies";
 import { findEmailWork } from "@/server/inbox/email-work";
-import { isInboxRunActive } from "@/server/inbox/inbox-run";
-import {
-  countByFilter,
-  findInboxEmail,
-  isInFilter,
-  isTipDismissed,
-  listInboxEmails,
-  parseInboxQuery,
-} from "@/server/inbox/inbox";
+import { findInboxEmail } from "@/server/inbox/inbox";
 
-// "Run the agent" and Run all are server actions on this page; the agent reads on after they
-// answer (`after`, ADR 0004), within the function's 300 s cap.
+// "Run the agent" and the runs on selected emails are server actions on this page; the agent
+// reads on after they answer (`after`, ADR 0004), within the function's 300 s cap.
 export const maxDuration = 300;
 
-export default async function InboxPage({ searchParams }: PageProps<"/">) {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function MailPage({ searchParams }: PageProps<"/">) {
   // The proxy already turned away anyone without a session; this is the page's own check.
   const user = await requireUser();
-  const query = parseInboxQuery(await searchParams);
+  const params: SearchParams = await searchParams;
+  const folder = parseFolder(params.folder);
+  const view = params.view === "detail" ? "detail" : "list";
+  const askedFor = typeof params.email === "string" ? params.email : undefined;
+  const emailId = askedFor && /^E\d{3}$/.test(askedFor) ? askedFor : null;
   const db = getDatabase();
 
-  const [emails, tipDismissed, runAllGoing] = await Promise.all([
-    listInboxEmails(db),
-    isTipDismissed(db, user.id),
-    isInboxRunActive(db),
-  ]);
-  const shown = emails.filter((email) => isInFilter(email, query.filter));
-  // With no email in the URL, the desk opens the first one the filter shows. An email the URL asks
-  // for that is not in today's inbox (E999, or not an id at all) opens nothing, and says so.
-  const askedFor = (await searchParams).email;
-  const selectedId = query.emailId ?? (askedFor === undefined ? (shown[0]?.emailId ?? null) : null);
-  const [selected, work] = selectedId
-    ? await Promise.all([findInboxEmail(db, selectedId), findEmailWork(db, selectedId)])
-    : [null, null];
+  const [emails, labels, presence] = await Promise.all([loadDeskEmails(), loadLabels(), loadPresence()]);
+  const [selected, work, reply] = emailId
+    ? await Promise.all([findInboxEmail(db, emailId), findEmailWork(db, emailId), findReply(db, emailId)])
+    : [null, null, null];
 
   return (
-    <InboxDesk
-      query={query}
+    <MailView
+      folder={folder}
+      view={view}
       emails={emails}
-      counts={countByFilter(emails)}
-      shown={shown}
+      labels={labels}
       selected={selected}
       work={work}
-      tipDismissed={tipDismissed}
-      agentOn={isAgentConfigured()}
-      notFound={askedFor !== undefined && selected === null}
-      runAllGoing={runAllGoing}
+      reply={reply}
+      presence={presence}
       isAdmin={user.role === "admin"}
+      notFound={askedFor !== undefined && selected === null}
     />
   );
 }

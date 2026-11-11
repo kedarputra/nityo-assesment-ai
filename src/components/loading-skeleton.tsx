@@ -10,12 +10,12 @@ import { createPortal } from "react-dom";
 
 const PLACES = {
   // An email row: the email and its Proposal.
-  email: ".desk-pane--email",
-  proposal: ".desk-pane--proposal",
+  email: ".reading-message",
+  proposal: ".reading-agent",
   // A filter chip: the list of emails.
   rows: ".rows-wrap",
   // A header tab: the whole page.
-  page: "#main",
+  page: ".app-main",
 } as const;
 
 export type SkeletonPlace = keyof typeof PLACES;

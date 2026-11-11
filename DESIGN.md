@@ -207,6 +207,41 @@ One of each.
   caret; it opens a menu with "Sign out", and for an admin "Run all" (or "Stop the run") and
   "Reset to 07:00…". With the agent switched off, an admin sees a one-line note in place of Run all.
 
+## Desk shell (ADR 0005)
+
+The desk works like Outlook for mail and Teams for presence. This section outranks the older
+three-pane layout above wherever they differ.
+
+- **Top bar.** The accent colour across the top: the HP mark and name, one global search
+  (Keyword or By meaning) in the middle, the agent's presence and the account menu at the right.
+- **Sidebar: sections, menus and sub-menus.** Sections (Mail, Labels, Agent, Help) fold with a
+  chevron. A menu with sub-menus (Inbox → Needs review, Flagged, Done, Not run yet; Drafts → Ready
+  to send) has its own chevron, and its sub-menus hang off a guide line. The current item gets
+  `accent-soft` and a 3px accent edge. Counts sit at the right. The sidebar collapses to an icon
+  rail on a desk, is a rail on a tablet, and is a drawer behind a menu button on a phone. A role
+  card at the foot says what this role can do.
+- **Message list.** A folder title (H1) with its count and a one-line purpose, then a search box
+  for the folder alone. A checkbox on every row and one for the page; selecting shows the
+  selection bar (labels, status, flag, Run agent). Sort, Group and Filter sit in one tool row.
+  Groups fold. Pages of 20 with Previous and Next. A row shows a dot when New, the sender, the
+  marks (flags) and time, the subject, two lines of preview, then the agent's status pill, the
+  triage status, labels and the reply's state.
+- **Flags are icons with fixed meanings.** Red filled flag: needs review, set by the system. Amber
+  outline flag: a person's follow-up. Green check: complete. Lucide icons throughout.
+- **Labels** are chips with a colour edge, a tag icon and the name, never colour alone. Colours
+  come from the palette: dusk, apricot, sandy, pumpkin, plus green, red and grey.
+- **Live box.** Whatever the agent is reading sits in one box above the list: a large count, the
+  run's tag (Run all, Selected, Scheduled run), the day's progress bar, and each email with a
+  ticking timer. It is an object, never a sentence.
+- **Presence.** A dot with a white ring and a word, as in Teams: Active (filled green, pulsing
+  unless reduced motion), Idle (green ring), Paused (sun), Off (grey).
+- **Reading pane.** A sticky command bar (Back on phones, Reply, Flag, Complete, Status, Labels,
+  Run the agent, then "3 of 12" with previous and next). The email reads like Outlook: subject,
+  marks, sender with customer, recipient and time. The agent's work sits beside it at 1500px and
+  wider, and below it otherwise.
+- **Composer.** To, Subject and the message, prefilled from the agent's draft. "Approve for
+  sending" (primary), "Save draft", "Discard". A note says nothing is sent from this desk.
+
 ## Interaction
 
 - **Keys on a desk** (shown as hints, never intercepted while typing): `j` / `k` next or previous,
