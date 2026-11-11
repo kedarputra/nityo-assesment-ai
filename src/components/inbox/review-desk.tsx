@@ -12,7 +12,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { InboxFilter, InboxView } from "@/server/inbox/inbox";
+import type { InboxView } from "@/server/inbox/inbox";
+import { mailHref, type FolderId } from "../mail/folders";
 import { undoReleaseAction, type ReviewActionResult } from "@/server/review/actions";
 
 // The desk around every decision (DESIGN.md, "Interaction"): the toast with its 10-second Undo,
@@ -45,7 +46,7 @@ interface Toast {
 }
 
 export interface ReviewDeskProviderProps {
-  filter: InboxFilter;
+  folder: FolderId;
   view: InboxView;
   // The emails the list shows, in order, and the one selected: `j` and `k` move between them.
   shownIds: string[];
@@ -53,7 +54,7 @@ export interface ReviewDeskProviderProps {
   children: ReactNode;
 }
 
-export function ReviewDeskProvider({ filter, view, shownIds, selectedId, children }: ReviewDeskProviderProps) {
+export function ReviewDeskProvider({ folder, view, shownIds, selectedId, children }: ReviewDeskProviderProps) {
   const router = useRouter();
   const [toast, setToast] = useState<Toast | null>(null);
   const [undoing, startUndo] = useTransition();
@@ -80,13 +81,10 @@ export function ReviewDeskProvider({ filter, view, shownIds, selectedId, childre
 
   const go = useCallback(
     (emailId: string | null) => {
-      const params = new URLSearchParams({ filter });
-      if (emailId) params.set("email", emailId);
       // On a phone, nothing left to decide goes back to the list.
-      params.set("view", emailId ? view : "list");
-      router.push(`/?${params.toString()}`);
+      router.push(mailHref({ folder, emailId, view: emailId && view === "detail" ? "detail" : undefined }));
     },
-    [filter, view, router],
+    [folder, view, router],
   );
 
   useEffect(() => {

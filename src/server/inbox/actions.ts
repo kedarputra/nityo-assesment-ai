@@ -12,6 +12,7 @@ import { AGENT_OFF_MESSAGE, isAgentConfigured } from "@/model/agent-switch";
 import { configuredModel } from "@/model/configured-model";
 import { requireRole } from "@/server/auth/current-user";
 import { RateLimited, takeRateLimit } from "@/server/rate-limits";
+import { originFromHeaders } from "@/server/request-origin";
 import { functionDeadline, stepInBackground } from "./background";
 import { dismissTip } from "./inbox";
 import { InboxRunRefused, startBackgroundInboxRun, stopInboxRun } from "./inbox-run";
@@ -72,11 +73,9 @@ export type StartInboxRunResult = { ok: true } | { ok: false; message: string };
 
 // The address the admin is using, so the background steps ask this same app for the next email.
 async function requestOrigin(): Promise<string> {
-  const incoming = await headers();
-  const host = incoming.get("x-forwarded-host") ?? incoming.get("host");
-  const protocol = incoming.get("x-forwarded-proto") ?? (host?.startsWith("localhost") || host?.startsWith("127.") ? "http" : "https");
-  if (!host) throw new Error("The request has no host.");
-  return `${protocol}://${host}`;
+  const origin = originFromHeaders(await headers());
+  if (!origin) throw new Error("The request has no host.");
+  return origin;
 }
 
 // Run all in the background (ADR 0004): the server reads the inbox one email per function, so the

@@ -1,7 +1,7 @@
 import { recordAudit } from "@/agent/audit";
 import { takeSnapshotLock } from "@/agent/run-agent";
 import type { Database } from "@/db/database";
-import { rateLimitEvents, sessions, signInThrottle, users } from "@/db/schema";
+import { agentSchedule, labels, rateLimitEvents, sessions, signInThrottle, users } from "@/db/schema";
 import type { Snapshot } from "@/snapshot/data-pack";
 import { resetToSnapshot } from "@/snapshot/snapshot";
 import { takeRateLimit } from "@/server/rate-limits";
@@ -12,8 +12,10 @@ import { isAnyRunGoing } from "./inbox-run";
 // owner's connection, the one role that may empty the append-only audit log (security 6).
 
 // Who may sign in, and how often they have acted, are not part of the Snapshot: a Reset from the
-// app keeps everyone signed in and never refills its own rate limit.
-const KEPT_BY_THE_APP = [users, sessions, signInThrottle, rateLimitEvents];
+// app keeps everyone signed in and never refills its own rate limit. The team's labels and the
+// agent's schedule are the team's own settings, so they stay too (ADR 0005); which emails carry a
+// label is the day's work, and goes back with the rest.
+const KEPT_BY_THE_APP = [users, sessions, signInThrottle, rateLimitEvents, labels, agentSchedule];
 
 export const RUN_IN_PROGRESS = "A run is in progress. Stop it first.";
 

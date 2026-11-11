@@ -1,0 +1,36 @@
+# The agent's schedule (ADR 0005): every 5 minutes, ask the live app whether a scheduled run is due.
+# The app decides (the admin's switch and interval, a run already going, an email left to read);
+# this workflow only knocks. Vercel Hobby crons run once a day, too seldom for this.
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions): APP_URL, the live URL
+# without a trailing slash, and CRON_SECRET, the same value as the app's CRON_SECRET in Vercel.
+# Without either, the workflow says so and succeeds, so a fork or a fresh repo stays green.
+name: agent-tick
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Tick
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::The schedule is not set up: add the APP_URL and CRON_SECRET repository secrets. Skipping."
+            exit 0
+          fi
+          curl -fsS --max-time 60 -X POST "${APP_URL%/}/api/agent/tick" -H "Authorization: Bearer $CRON_SECRET"
+          echo

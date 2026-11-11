@@ -271,6 +271,10 @@ export const inboxRuns = pgTable(
     // this run's secret, kept only as a SHA-256 hash, at the address the admin used.
     stepTokenHash: text("step_token_hash"),
     origin: text("origin"),
+    // The emails this run reads, when it is a run on selected emails; none means every email left.
+    emailIds: jsonb("email_ids").$type<string[]>(),
+    // Who asked for it: a person (Run all, or selected emails) or the schedule.
+    trigger: text("trigger", { enum: ["person", "schedule"] }).notNull().default("person"),
   },
   (table) => [
     check("inbox_runs_end_reason_check", sql`${table.endReason} in ('finished', 'stopped', 'spend-limit', 'abandoned')`),
@@ -576,3 +580,115 @@ export const auditEvents = pgTable(
     check("audit_events_actor_check", sql`${table.actor} in ('agent', 'gate', 'person')`),
   ],
 );
+
+// ---- A person's triage (ADR 0005): labels, a flag and a status beside the agent's outcome -----
+
+export const labelColors = ["dusk", "apricot", "sandy", "pumpkin", "green", "red", "grey"] as const;
+export type LabelColor = (typeof labelColors)[number];
+
+// Labels any person can create and put on emails. Kept by a Reset: they are the team's own words.
+export const labels = pgTable(
+  "labels",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    color: text("color", { enum: labelColors }).notNull(),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("labels_name_idx").on(sql`lower(${table.name})`),
+    check("labels_color_check", sql`${table.color} in ('dusk', 'apricot', 'sandy', 'pumpkin', 'green', 'red', 'grey')`),
+  ],
+);
+
+export const emailLabels = pgTable(
+  "email_labels",
+  {
+    emailId: text("email_id")
+      .notNull()
+      .references(() => emails.emailId),
+    labelId: integer("label_id")
+      .notNull()
+      .references(() => labels.id, { onDelete: "cascade" }),
+    addedBy: integer("added_by").references(() => users.id),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.emailId, table.labelId] }), index("email_labels_label_idx").on(table.labelId)],
+);
+
+export const triageStatuses = ["new", "in-progress", "waiting", "done"] as const;
+export type TriageStatus = (typeof triageStatuses)[number];
+export const triageFlags = ["none", "follow-up", "complete"] as const;
+export type TriageFlag = (typeof triageFlags)[number];
+
+// A person's status and flag for an email. No row means New and no flag.
+export const emailTriage = pgTable(
+  "email_triage",
+  {
+    emailId: text("email_id")
+      .primaryKey()
+      .references(() => emails.emailId),
+    status: text("status", { enum: triageStatuses }).notNull().default("new"),
+    flag: text("flag", { enum: triageFlags }).notNull().default("none"),
+    updatedBy: integer("updated_by").references(() => users.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("email_triage_status_check", sql`${table.status} in ('new', 'in-progress', 'waiting', 'done')`),
+    check("email_triage_flag_check", sql`${table.flag} in ('none', 'follow-up', 'complete')`),
+  ],
+);
+
+export const replyStates = ["draft", "ready"] as const;
+export type ReplyState = (typeof replyStates)[number];
+
+// The reply a person composes (Outlook-style), prefilled from the agent's Draft reply. "ready" is
+// approved for sending, which is logged as "would send": nothing is ever sent.
+export const replyCompositions = pgTable(
+  "reply_compositions",
+  {
+    emailId: text("email_id")
+      .primaryKey()
+      .references(() => emails.emailId),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    state: text("state", { enum: replyStates }).notNull(),
+    updatedBy: integer("updated_by")
+      .notNull()
+      .references(() => users.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [check("reply_compositions_state_check", sql`${table.state} in ('draft', 'ready')`)],
+);
+
+// The agent's schedule (ADR 0005): an admin turns the automatic run on and sets its interval. One
+// row, id 1. Kept by a Reset.
+export const agentSchedule = pgTable(
+  "agent_schedule",
+  {
+    id: integer("id").primaryKey(),
+    enabled: boolean("enabled").notNull().default(false),
+    intervalMinutes: integer("interval_minutes").notNull().default(15),
+    // The admin whose name a scheduled run carries.
+    updatedBy: integer("updated_by").references(() => users.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastTickAt: timestamp("last_tick_at", { withTimezone: true }),
+    lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("agent_schedule_single_row", sql`${table.id} = 1`),
+    check("agent_schedule_interval_check", sql`${table.intervalMinutes} between 5 and 60`),
+  ],
+);
+
+// An email's embedding for search by meaning. A Reset empties it (the emails' truncate cascades
+// here); the next search by meaning rebuilds it in one batch.
+export const emailEmbeddings = pgTable("email_embeddings", {
+  emailId: text("email_id")
+    .primaryKey()
+    .references(() => emails.emailId),
+  model: text("model").notNull(),
+  vector: jsonb("vector").$type<number[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
