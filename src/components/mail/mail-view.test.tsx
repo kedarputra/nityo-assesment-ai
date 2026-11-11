@@ -151,7 +151,7 @@ describe("MailView, the reading pane", () => {
 
     expect(html).toContain('<h1 class="message-subject">Order for this week</h1>');
     expect(html).toContain("To orders@harborpointsupply.example");
-    expect(html).toContain('<span class="message-customer">Bluefin Bistro Group</span>');
+    expect(html).toMatch(/<p class="message-customer-line">.*Bluefin Bistro Group<\/p>/);
     expect(html).toContain(">Reply</button>");
     expect(html).toContain("1 of 25");
     expect(html).toMatch(/aria-label="Next email"/);

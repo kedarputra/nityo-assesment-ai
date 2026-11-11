@@ -24,6 +24,7 @@ import type { LabelColor } from "@/db/schema";
 import type { PresenceState } from "@/server/desk/presence";
 import { createLabelAction } from "@/server/desk/actions";
 import { PresenceDot, PRESENCE_WORDS } from "./presence-badge";
+import { ResizeHandle } from "./resize-handle";
 import { CollapseButton } from "./shell-buttons";
 
 export interface SidebarProps {
@@ -119,6 +120,7 @@ export function Sidebar({ counts, labels, role, presence, reading }: SidebarProp
       </div>
 
       <RoleCard role={role} />
+      <ResizeHandle cssVar="--sidebar" measure=".sidebar" min={200} max={420} label="Resize the sidebar" className="resize-handle--sidebar" />
     </nav>
   );
 }
@@ -291,17 +293,18 @@ function NewLabel() {
   );
 }
 
-// Who you are on this desk and what you can do here: the role's use case, in four lines.
+// Who you are on this desk and what you can do here: the role's use case, folded to one line
+// until it is opened.
 function RoleCard({ role }: { role: "reviewer" | "admin" }) {
   return (
-    <div className="role-card">
-      <p className="role-card-title">{role === "admin" ? "You’re an admin" : "You’re a reviewer"}</p>
+    <details className="role-card">
+      <summary className="role-card-title">{role === "admin" ? "You’re an admin" : "You’re a reviewer"}</summary>
       <ul>
         <li>Decide the agent’s Proposals</li>
         <li>Reply, label, flag and set status</li>
         <li>Run the agent on emails you pick</li>
         {role === "admin" ? <li>Run all, schedule and reset</li> : null}
       </ul>
-    </div>
+    </details>
   );
 }
